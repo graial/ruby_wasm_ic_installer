@@ -33,10 +33,14 @@ own parser (it resolves nothing: the lock is yours) and, for each locked gem:
   extensions;
 - opens only its `require_paths` (normally `lib/`);
 - **rewrites magic comments** naming an alias of an encoding a `minimal`
-  canister has (`# encoding: binary` to `ascii-8bit`, `ascii` to `us-ascii`),
-  and **refuses** a file in an encoding it lacks (`ISO-8859-1`, `Shift_JIS`).
-  A canister knows twelve encodings, each by one name and no alias, and reads
-  the comment before any Ruby runs. Every rewrite is in the report.
+  canister claims (`# encoding: binary` to `ascii-8bit`, `ascii` to
+  `us-ascii`), and **refuses** a file in any other encoding (`ISO-8859-1`,
+  `Shift_JIS`, `EUC-JP`, `UTF-16LE`). A canister claims three encodings,
+  UTF-8, US-ASCII and ASCII-8BIT, each by one name and no alias, and reads the
+  comment before any Ruby runs. It lists nine more names (the UTF-16 and
+  UTF-32 family, UTF8-MAC, EUC-JP, Windows-31J) with no encoding behind them:
+  a file whose comment names one would load as ASCII-8BIT, so it is refused
+  too. Every rewrite is in the report.
 
 It asks the canister what it has (`installed`), and sends **only the gem
 versions it lacks**, packed into calls of up to 2,000,000 bytes (the IC's
@@ -154,8 +158,10 @@ Exit status: 0 done, 1 refused (by the canister, or by `setup`'s questions),
 - **Gems from a gem server only;** a `git` or `path` source in the lock is
   refused.
 - **A single file larger than one call** (about 2 MB) cannot be sent.
-- **The twelve encodings** are those a `minimal` canister was observed to have
-  (ruby_wasm_builder 0.6.0 to 0.8.0); a Build with more is a release of this gem.
+- **Three encodings:** UTF-8, US-ASCII and ASCII-8BIT, the ones a `minimal`
+  canister claims (ruby_wasm_builder's ADR-0053; the other nine names it lists
+  were probed on 0.8.0 and are names only, W30). A Build that links encodings
+  is a release of this gem.
 - The canister keeps no content hash of what it holds yet: `installed` reports
   versions, not digests.
 
