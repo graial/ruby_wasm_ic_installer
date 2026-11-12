@@ -12,7 +12,7 @@ RSpec.describe RubyWasmIcInstaller::Canister do
       k.data_dir = @data
       $LOAD_PATH.unshift("/app")
       @rest = $LOAD_PATH.drop(1)
-      k.boot!
+      described_class.boot!
       ex.run
     end
   end
@@ -21,6 +21,77 @@ RSpec.describe RubyWasmIcInstaller::Canister do
   def commit(gems = [], setup = nil) = install_commit({ gems: gems, setup: setup })
   def refused(&blk) = expect(&blk).to(raise_error(IC::Refusal))
   def gems_dir = File.join(@data, "gems")
+
+  describe "installed, as protocol 2" do
+    it "reports the protocol, the builder's Build and Release when it says them, and no load failures" do
+      expect(installed).to include(protocol: 2, build: nil, release: nil, load_failures: [])
+      IC.const_set(:BUILD, "full")
+      IC.const_set(:RELEASE, "0.13.0")
+      expect(installed).to include(build: "full", release: "0.13.0")
+    ensure
+      IC.send(:remove_const, :BUILD) if IC.const_defined?(:BUILD)
+      IC.send(:remove_const, :RELEASE) if IC.const_defined?(:RELEASE)
+    end
+  end
+
+  describe "the require recorder" do
+    def install_gem(name, body)
+      put(["#{name}-1.0.0/lib/#{name}.rb", body])
+      commit(["#{name}-1.0.0"], { generation: 1, load_paths: ["#{name}-1.0.0/lib"] })
+      described_class.boot!
+    end
+
+    it "records an outermost require that raises out of an installed gem, and raises it unchanged" do
+      install_gem("badgem", "raise LoadError, \"cannot load such file -- dep\\nsecond line\"\n")
+      expect { require "badgem" }.to raise_error(LoadError, /cannot load such file -- dep/)
+      expect(installed[:load_failures]).to eq(["badgem-1.0.0: LoadError: cannot load such file -- dep"])
+    end
+
+    it "records a syntax error in a gem as well" do
+      install_gem("syn", "def (\n")
+      expect { require "syn" }.to raise_error(SyntaxError)
+      expect(installed[:load_failures].first).to start_with("syn-1.0.0: SyntaxError:")
+    end
+
+    it "does not record a gem's own rescued, optional require, nor the app's own failure" do
+      install_gem("opt", "begin\n  require 'nothing_here'\nrescue LoadError\nend\n")
+      expect(require("opt")).to be(true)
+      expect { require "not_a_gem_at_all" }.to raise_error(LoadError)
+      expect(installed[:load_failures]).to eq([])
+    end
+
+    it "keeps at most MAX_FAILURES, and starts empty at each boot" do
+      install_gem("badgem", "raise LoadError, 'x'\n")
+      (k::MAX_FAILURES + 5).times { expect { require "badgem" }.to raise_error(LoadError) }
+      expect(installed[:load_failures].size).to eq(k::MAX_FAILURES)
+      described_class.boot!
+      expect(installed[:load_failures]).to eq([])
+    end
+
+    it "leaves a successful require alone" do
+      install_gem("fine", "FINE = 1\n")
+      expect(require("fine")).to be(true)
+      expect(FINE).to eq(1)
+    ensure
+      Object.send(:remove_const, :FINE) if Object.const_defined?(:FINE)
+    end
+  end
+
+  describe "install_verify" do
+    it "requires each name and says ok or what failed, recording nothing" do
+      put(["good-1.0.0/lib/good.rb", "GOOD = 1\n"])
+      commit(["good-1.0.0"], { generation: 1, load_paths: ["good-1.0.0/lib"] })
+      described_class.boot!
+      expect(install_verify(%w[good nope])).to eq(["ok good", "FAIL nope: LoadError: cannot load such file -- nope"])
+      expect(installed[:load_failures]).to eq([])
+    ensure
+      Object.send(:remove_const, :GOOD) if Object.const_defined?(:GOOD)
+    end
+
+    it "is for controllers only" do
+      refused { IC.controller = false; install_verify(["x"]) }
+    end
+  end
 
   describe "install_put" do
     it "writes into .partial/<name-version>/, making directories, and says what it wrote" do
@@ -84,7 +155,7 @@ RSpec.describe RubyWasmIcInstaller::Canister do
       commit(%w[rack-3.1.8], { generation: 2, load_paths: %w[rack-3.1.8/lib] })
       expect { commit([], { generation: 2, load_paths: %w[rack-3.1.8/lib] }) }.to raise_error(IC::Refusal, /above/)
       expect { commit([], { generation: 0, load_paths: [] }) }.to raise_error(IC::Refusal, /above/)
-      k.boot!
+      described_class.boot!
       expect(installed[:running]).to eq(2)
     end
 
@@ -106,7 +177,7 @@ RSpec.describe RubyWasmIcInstaller::Canister do
     end
 
     it "puts the load paths after /app and before the rest (the Shipped library), in the lock's order" do
-      k.boot!
+      described_class.boot!
       expect($LOAD_PATH).to eq(["/app", File.join(gems_dir, "rack-3.1.8/lib"), File.join(gems_dir, "roda-3.109.0/lib"),
                                 *@rest])
       expect(installed).to include(running: 1, pending: 1, running_paths: %w[rack-3.1.8/lib roda-3.109.0/lib])
@@ -114,14 +185,14 @@ RSpec.describe RubyWasmIcInstaller::Canister do
 
     it "puts them first when there is no /app, and adds none twice" do
       $LOAD_PATH.delete("/app")
-      k.boot!
-      k.boot!
+      described_class.boot!
+      described_class.boot!
       expect($LOAD_PATH).to eq([File.join(gems_dir, "rack-3.1.8/lib"), File.join(gems_dir, "roda-3.109.0/lib"), *@rest])
     end
 
     it "boots with nothing installed when there is no setup file" do
       File.delete(File.join(@data, "setup.rb"))
-      k.boot!
+      described_class.boot!
       expect(installed).to include(running: nil, pending: nil, load_paths: [], running_paths: [])
     end
 
@@ -166,7 +237,7 @@ RSpec.describe RubyWasmIcInstaller::Canister do
     end
 
     it "removes a symlink as a file, without following it" do
-      k.boot!
+      described_class.boot!
       target = File.join(File.dirname(@data), "outside")
       Dir.mkdir(target)
       File.symlink(target, File.join(gems_dir, "rack-3.1.7/lib/link"))
@@ -183,12 +254,14 @@ RSpec.describe RubyWasmIcInstaller::Canister do
       expect(code).not_to match(/Encoding::/)
     end
 
-    it "requires nothing, so it loads with core Ruby and the builder's IC alone" do
-      expect(code).not_to match(/\brequire(_relative)?\b/)
+    it "requires no library, so it loads with core Ruby and the builder's IC alone" do
+      # It wraps and calls `require` (the recorder, install_verify), but never
+      # loads a library of its own by name.
+      expect(code).not_to match(/\brequire_relative\b|^\s*require\s+["']/)
     end
 
     it "defines the four handlers its Declarations name, at the top level" do
-      %i[install_put install_commit install_remove installed].each do |m|
+      %i[install_put install_commit install_remove install_verify installed].each do |m|
         expect(Object.private_method_defined?(m)).to be(true), m.to_s
       end
     end

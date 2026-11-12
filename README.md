@@ -28,9 +28,10 @@ own parser (it resolves nothing: the lock is yours) and, for each locked gem:
 - **refuses** it if it has a C extension, or is locked only for a native
   platform: a canister cannot load compiled code, so only pure Ruby can be
   installed;
-- **skips** it, saying so, if `ruby_wasm_ic_minimal` is in the lock and stands
-  in for it (`stringio`, `strscan`, `date`), since the real ones are C
-  extensions;
+- **skips** it, saying so, if the target already has it: on `minimal`, when
+  `ruby_wasm_ic_minimal` is in the lock and stands in for it (`stringio`,
+  `strscan`, `date`); on `full`, the extensions it links (`stringio`,
+  `strscan`). The real ones are C extensions;
 - opens only its `require_paths` (normally `lib/`);
 - **rewrites magic comments** naming an alias of an encoding a `minimal`
   canister claims (`# encoding: binary` to `ascii-8bit`, `ascii` to
@@ -40,7 +41,9 @@ own parser (it resolves nothing: the lock is yours) and, for each locked gem:
   comment before any Ruby runs. It lists nine more names (the UTF-16 and
   UTF-32 family, UTF8-MAC, EUC-JP, Windows-31J) with no encoding behind them:
   a file whose comment names one would load as ASCII-8BIT, so it is refused
-  too. Every rewrite is in the report.
+  too. Every rewrite is in the report. (This is `minimal`'s rule and is
+  applied to every target for now; a `full` canister has not needed an install
+  yet, so it is revisited then.)
 
 It asks the canister what it has (`installed`), and sends **only the gem
 versions it lacks**, packed into calls of up to 2,000,000 bytes (the IC's
@@ -83,22 +86,24 @@ ruby_wasm_ic_installer setup my_app [--yes | --check]
 `setup` makes three changes, each between marker comments
 (`# >>> ruby_wasm_ic_installer` … `# <<< ruby_wasm_ic_installer`):
 
-- in **`ic-interface.rb`**, the Installer's four Declarations and their types:
+- in **`ic-interface.rb`**, the Installer's five Declarations and their types:
 
   ```ruby
   type :InstallFile,   record(path: Text, body: Blob)
   type :InstallSetup,  record(generation: Nat64, load_paths: Vec[Text])
   type :InstallCommit, record(gems: Vec[Text], setup: Opt[:InstallSetup])
   type :Installed,     record(running: Opt[Nat64], pending: Opt[Nat64], gems: Vec[Text], partial: Vec[Text],
-                              load_paths: Vec[Text], running_paths: Vec[Text])
+                              load_paths: Vec[Text], running_paths: Vec[Text], protocol: Nat64,
+                              build: Opt[Text], release: Opt[Text], load_failures: Vec[Text])
   update :install_put,    takes: [Vec[:InstallFile]], returns: Text
   update :install_commit, takes: [:InstallCommit],    returns: Text
   update :install_remove, takes: [Text],              returns: Text
+  query  :install_verify, takes: [Vec[Text]],         returns: Vec[Text]
   query  :installed,      takes: [],                  returns: :Installed
   ```
 
 - at the top of **`app.rb`** (after any shebang and magic comments), the
-  `require` of the canister half, which defines those four methods and loads
+  `require` of the canister half, which defines those five methods and loads
   `/data/setup.rb` if there is one;
 - the canister half itself, copied to **`vendor/ruby_wasm_ic_installer/`**.
   It uses only core Ruby and ruby_wasm_builder's `IC`, and loads on `minimal`.
@@ -128,11 +133,73 @@ rescue LoadError
 end
 ```
 
+## The target: Build and Release
+
+What a gem needs depends on the module the canister runs: its **Build**
+(`minimal` or `full`) and ruby_wasm_builder **Release**. Declare it in
+`.ruby_wasm_ic_installer.yml`, in the icp project root (or `--config PATH`):
+
+```yaml
+build: full          # minimal | full
+release: 0.13.0
+verify: [roda, ruby_wasm_ic_rack]    # require names `verify` checks on the canister
+```
+
+Every key is optional. The target is resolved, highest first, from `--build`
+and `--release`, this file, what the canister reports (`IC::BUILD` and
+`IC::RELEASE`, once the builder sets them), and last the assumption `minimal`,
+which prints a line saying so. The file is the desired state and the canister
+the observed one; the Installer keeps no state of its own, so a move from one
+Build or Release to another shows as a **transition** line until the canister
+has been upgraded.
+
+On the target, `install` and `status`:
+
+- on `full`, skip `stringio` and `strscan` as linked, and **refuse**
+  `ruby_wasm_ic_minimal` by name ("remove it from the Gemfile: `full` links
+  the real extensions") before anything is sent;
+- refuse a gem version known to refuse the target (`ruby_wasm_ic_minimal`
+  before 0.1.5 on `minimal` 0.13.0 or later). `install` checks the lock;
+  `status` checks what the pending and running setups would load.
+- refuse any other compiled gem: add it to ruby_wasm_builder, not here.
+
+The tables behind this are in this gem (`Rules`); a new row is a release.
+
+**Gems first, then the module.** A new setup file takes effect at the next
+upgrade, **whatever module that upgrade brings**: the canister half boots
+`/data/setup.rb` as it finds it. So to move a canister to a new Release,
+`install` first (to the canister still running the old one), then upgrade to
+the new module. This is guaranteed and has a spec.
+
+## Verifying a boot
+
+The canister half wraps `require` and records each error that escapes an
+outermost `require` from an installed gem (name, version, the error's first
+line; at most 50 a boot). A gem's own `rescue LoadError` around an optional
+require is nested, so it is not recorded; an Application that rescues
+`LoadError` itself for a deliberately optional gem will see it listed.
+`status` prints them as `load failure:`.
+
+`verify` goes further: it calls `install_verify` (a query, so it changes
+nothing) with the names in `verify:`, which `require`s each on the canister
+and answers `ok` or the error. It takes names, never code. `verify-init`
+writes a first list: the require name each locked gem's gemspec points at
+(`autorequire`, else a file named for the gem under its `require_paths`),
+from the gemspec's file list alone, with no gem code run; it names the gems it
+found nothing for.
+
+`install --upgrade` sends, runs `icp deploy <canister> --mode upgrade`, and
+verifies, exiting 1 if anything failed to load. A CI job can filter on
+`Gemfile*` and pass `--upgrade` only then. `icp deploy` builds and installs
+the project's module as well, so the new module lands in the same step.
+
 ## Commands
 
 ```
-ruby_wasm_ic_installer install CANISTER [--lock Gemfile.lock] [--dry-run] [icp options]
+ruby_wasm_ic_installer install CANISTER [--lock Gemfile.lock] [--dry-run] [--upgrade] [icp options]
 ruby_wasm_ic_installer status  CANISTER [icp options]
+ruby_wasm_ic_installer verify  CANISTER [icp options]
+ruby_wasm_ic_installer verify-init [--lock Gemfile.lock] [--yes]
 ruby_wasm_ic_installer prune   CANISTER [--dry-run] [icp options]
 ruby_wasm_ic_installer setup   APP_DIR  [--yes | --check]
 ```
@@ -141,15 +208,20 @@ ruby_wasm_ic_installer setup   APP_DIR  [--yes | --check]
 options pass through to `icp canister call`: `-e/--environment`,
 `-n/--network`, `--identity`, `--project-root` (icp's
 `--project-root-override`) and `--icp PATH`. Other options: `--cache DIR`,
-`--budget BYTES`.
+`--budget BYTES`, `--build`, `--release`, `--config PATH`.
+
+An icp-cli error (a project that will not load, say, or a missing file icp
+reads) is printed as icp-cli's own message under a header saying so, so it does
+not look like an Installer fault.
 
 Every call goes through `icp canister call <canister> <method> --args-file
 <file> --args-format bin -o hex`, so it needs [icp-cli](https://cli.internetcomputer.org)
 1.6 or later. The gem encodes and decodes its few Candid types itself; it
 holds no keys and picks no network.
 
-Exit status: 0 done, 1 refused (by the canister, or by `setup`'s questions),
-2 a usage error or a gem it cannot install.
+Exit status: 0 done, 1 refused (by the canister, or by `setup`'s questions) or
+a verify that failed, 2 a usage error, a gem it cannot install, or a gem the
+target refuses.
 
 ## Limits
 
@@ -162,6 +234,11 @@ Exit status: 0 done, 1 refused (by the canister, or by `setup`'s questions),
   canister claims (ruby_wasm_builder's ADR-0053; the other nine names it lists
   were probed on 0.8.0 and are names only, W30). A Build that links encodings
   is a release of this gem.
+- **Two halves, one version.** The canister half is vendored into the
+  Application, so it can be older than this gem. `installed` reports a
+  `protocol` number (2 from 0.2.0); against protocol 1 the Installer still
+  installs, says the canister half reports no Build and no load failures, and
+  `verify` asks you to re-run `setup`.
 - The canister keeps no content hash of what it holds yet: `installed` reports
   versions, not digests.
 

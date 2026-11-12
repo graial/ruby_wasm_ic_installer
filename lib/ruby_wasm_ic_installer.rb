@@ -10,6 +10,9 @@ end
 
 require_relative "ruby_wasm_ic_installer/version"
 require_relative "ruby_wasm_ic_installer/candid"
+require_relative "ruby_wasm_ic_installer/config"
+require_relative "ruby_wasm_ic_installer/target"
+require_relative "ruby_wasm_ic_installer/rules"
 require_relative "ruby_wasm_ic_installer/lockfile"
 require_relative "ruby_wasm_ic_installer/magic_comment"
 require_relative "ruby_wasm_ic_installer/gem_files"

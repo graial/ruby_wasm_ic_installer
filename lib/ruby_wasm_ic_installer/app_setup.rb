@@ -21,7 +21,7 @@ module RubyWasmIcInstaller
     CLOSE = "# <<< ruby_wasm_ic_installer"
     NOTE = " (written by `ruby_wasm_ic_installer setup`; edit outside these lines)"
     BLOCK = /^#{Regexp.escape(OPEN)}.*?^#{Regexp.escape(CLOSE)}\n?/m
-    NAMES = %w[install_put install_commit install_remove installed].freeze
+    NAMES = %w[install_put install_commit install_remove install_verify installed].freeze
     TYPES = %w[InstallFile InstallSetup InstallCommit Installed].freeze
     VENDOR = File.join("vendor", "ruby_wasm_ic_installer")
     CANISTER_SOURCE = File.expand_path("canister.rb", __dir__)
@@ -32,10 +32,12 @@ module RubyWasmIcInstaller
       type :InstallSetup,  record(generation: Nat64, load_paths: Vec[Text])
       type :InstallCommit, record(gems: Vec[Text], setup: Opt[:InstallSetup])
       type :Installed,     record(running: Opt[Nat64], pending: Opt[Nat64], gems: Vec[Text], partial: Vec[Text],
-                                  load_paths: Vec[Text], running_paths: Vec[Text])
+                                  load_paths: Vec[Text], running_paths: Vec[Text], protocol: Nat64,
+                                  build: Opt[Text], release: Opt[Text], load_failures: Vec[Text])
       update :install_put,    takes: [Vec[:InstallFile]], returns: Text
       update :install_commit, takes: [:InstallCommit],    returns: Text
       update :install_remove, takes: [Text],              returns: Text
+      query  :install_verify, takes: [Vec[Text]],         returns: Vec[Text]
       query  :installed,      takes: [],                  returns: :Installed
       #{CLOSE}
     RUBY

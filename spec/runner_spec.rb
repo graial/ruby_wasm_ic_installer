@@ -34,13 +34,14 @@ RSpec.describe RubyWasmIcInstaller::Runner do
     r = described_class.new(canister: "app", spawn: ->(*) { ["", err, bad] })
     expect { r.call("install_put", "x") }.to raise_error(described_class::CallError) { |e|
       expect(e.refusal).to eq("only a controller may install code")
-      expect(e.message).to start_with("install_put: Error: Canister called")
+      expect(e.message).to start_with("icp canister call install_put failed (icp-cli's message follows):\nError: Canister called")
     }
   end
 
   it "raises with stdout when stderr is empty, and with no refusal for another failure" do
     r = described_class.new(canister: "app", spawn: ->(*) { ["network unreachable", "", bad] })
-    expect { r.call("installed", "x") }.to raise_error(described_class::CallError, "installed: network unreachable") { |e|
+    expect { r.call("installed", "x") }.to raise_error(described_class::CallError,
+                                                         "icp canister call installed failed (icp-cli's message follows):\nnetwork unreachable") { |e|
       expect(e.refusal).to be_nil
     }
   end
@@ -54,5 +55,20 @@ RSpec.describe RubyWasmIcInstaller::Runner do
     expect(Open3).to receive(:capture3).with("icp", "canister", "call", "app", "installed", any_args)
                                        .and_return(["00", "", ok])
     expect(described_class.new(canister: "app").call("installed", "x")).to eq("\x00".b)
+  end
+
+  describe "#deploy" do
+    it "runs icp deploy in upgrade mode with the passthrough args" do
+      seen = nil
+      r = described_class.new(canister: "app", icp_args: ["-e", "ic"], spawn: ->(*argv) { (seen = argv) && ["done", "", ok] })
+      expect(r.deploy).to eq("done")
+      expect(seen).to eq(%w[icp deploy app --mode upgrade -e ic])
+    end
+
+    it "gives icp's message under the header when it fails" do
+      r = described_class.new(canister: "app", spawn: ->(*) { ["", "cannot read rand_salt", bad] })
+      expect { r.deploy }.to raise_error(described_class::CallError,
+                                         "icp deploy app --mode upgrade failed (icp-cli's message follows):\ncannot read rand_salt")
+    end
   end
 end

@@ -94,6 +94,9 @@ module RubyWasmIcInstaller
     # (text)
     def text_arg(s) = MAGIC + leb(0) + leb(1) + sleb(TEXT) + text_value(s)
 
+    # (vec text)
+    def texts_arg(list) = MAGIC + types("\x6d".b + sleb(TEXT)) + leb(1) + sleb(0) + texts_value(list)
+
     # ()
     def empty_args = MAGIC + leb(0) + leb(0)
 

@@ -51,6 +51,18 @@ module RubyWasmIcInstaller
       []
     end
 
+    # The require names that look like this gem's front door: its
+    # `autorequire` if it sets one, else the files under its require_paths
+    # named for the gem (`roda`, `net-http` as `net/http` or `net_http`). A
+    # scan of the gemspec's file list; no gem code runs.
+    def entry_points(locked)
+      spec = ::Gem::Package.new(fetch(locked)).spec
+      return [spec.autorequire] if spec.autorequire
+
+      names = [locked.name, locked.name.tr("-", "/"), locked.name.tr("-", "_")].uniq
+      names.select { |n| spec.require_paths.any? { |rp| spec.files.include?("#{rp}/#{n}.rb") } }
+    end
+
     private
 
     def fetch(locked)
@@ -90,7 +102,8 @@ module RubyWasmIcInstaller
       return if spec.extensions.empty?
 
       raise Refused, "#{locked.name_version} has a C extension (#{spec.extensions.join(', ')}): only pure-Ruby " \
-                     "gems can be installed into a canister, which cannot load compiled code"
+                     "gems can be installed into a canister, which cannot load compiled code; a compiled gem has to " \
+                     "be added to ruby_wasm_builder"
     end
 
     def read_files(locked, package, spec)

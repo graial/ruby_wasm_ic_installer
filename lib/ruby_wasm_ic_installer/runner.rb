@@ -41,8 +41,7 @@ module RubyWasmIcInstaller
         argv = [@icp, "canister", "call", @canister, method, "--args-file", f.path, "--args-format", "bin",
                 "-o", "hex", *(query ? ["--query"] : []), *@icp_args]
         out, err, status = @spawn.call(*argv)
-        raise CallError.new("#{method}: #{err.strip.empty? ? out.strip : err.strip}", refusal: refusal(err)) \
-          unless status.success?
+        raise CallError.new(failure("icp canister call #{method}", out, err), refusal: refusal(err)) unless status.success?
 
         hex = out.strip
         raise CallError, "#{method}: icp replied #{out.inspect[0, 200]}, not hex" unless hex.match?(/\A(?:[0-9a-fA-F]{2})+\z/)
@@ -51,7 +50,22 @@ module RubyWasmIcInstaller
       end
     end
 
+    # `icp deploy <canister> --mode upgrade`: builds and installs the project's
+    # module as an upgrade, which boots the canister again.
+    def deploy
+      out, err, status = @spawn.call(@icp, "deploy", @canister, "--mode", "upgrade", *@icp_args)
+      raise CallError, failure("icp deploy #{@canister} --mode upgrade", out, err) unless status.success?
+
+      out
+    end
+
     private
+
+    # icp-cli's own message under a header saying whose it is, so a project
+    # error (a missing file icp reads, say) does not look like an Installer fault.
+    def failure(what, out, err)
+      "#{what} failed (icp-cli's message follows):\n#{err.strip.empty? ? out.strip : err.strip}"
+    end
 
     # The text after `refused: ` in a trap message, if the canister refused.
     def refusal(err) = err[/refused: (.*?)(?:'|"|$)/, 1]
