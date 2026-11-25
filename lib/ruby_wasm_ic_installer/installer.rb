@@ -210,13 +210,16 @@ module RubyWasmIcInstaller
     end
 
     # [warnings, notes] for the skipped linked gems: a locked version other
-    # than the one the Build links, or one this gem does not mirror.
+    # than the one the Build links, a gem the Build has as part of Ruby, or
+    # one this gem does not mirror.
     def linked_versions(target, skipped, linked_gems)
       warnings = []
       notes = []
       skipped.select { linked_gems.include?(_1.name) }.each do |g|
         have = Rules.linked_version(target.build, g.name)
-        if have.nil?
+        if Rules.part_of_ruby?(g.name)
+          notes << "#{g.name_version} is locked; #{target.build} carries #{g.name} as part of Ruby 3.3.6, not as a gem"
+        elsif have.nil?
           notes << "#{g.name_version} is locked; #{target.build} links #{g.name}, a version this Installer does not mirror"
         elsif have != g.version
           warnings << "#{g.name_version} is locked; #{target.build} links #{g.name} #{have}, which is what will load"

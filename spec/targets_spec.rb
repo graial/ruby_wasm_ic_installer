@@ -37,6 +37,7 @@ RSpec.describe RubyWasmIcInstaller::Installer do
         @factory.build("json", v, { "lib/json.rb" => "", "ext/json/ext/parser/extconf.rb" => "" },
                        extensions: ["ext/json/ext/parser/extconf.rb"])
       end
+      @factory.build("monitor", "0.3.0", "lib/monitor.rb" => "")
       @factory.build("zlib", "3.1.1", { "ext/zlib/extconf.rb" => "", "lib/zlib.rb" => "" }, extensions: ["ext/zlib/extconf.rb"])
       @factory.build("eucgem", "1.0.0", "lib/eucgem.rb" => "# -*- coding: euc-jp -*-\nX = 1\n",
                      "lib/eucgem/bin.rb" => "# encoding: binary\n")
@@ -78,11 +79,12 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       expect(@factory.fetched).to eq(["rack-3.1.8"])
     end
 
-    it "warns when the locked version is not the one full links, and notes a version it does not mirror" do
-      report = build(config: full).install(lockfile(%w[json 2.9.1], %w[zlib 3.1.1]))
+    it "warns when the locked version is not the one full links, and notes a gem full has as part of Ruby" do
+      report = build(config: full).install(lockfile(%w[json 2.9.1], %w[monitor 0.3.0]))
       expect(report).to include("warning: json-2.9.1 is locked; full links json 2.7.1, which is what will load",
-                                "note: zlib-3.1.1 is locked; full links zlib, a version this Installer does not mirror")
-      expect(build(config: full).install(lockfile(%w[json 2.7.1])).grep(/warning|note/)).to eq([])
+                                "skip monitor-0.3.0: linked into the full module, so it is not sent",
+                                "note: monitor-0.3.0 is locked; full carries monitor as part of Ruby 3.3.6, not as a gem")
+      expect(build(config: full).install(lockfile(%w[json 2.7.1], %w[zlib 3.1.1])).grep(/warning|note/)).to eq([])
     end
 
     it "refuses the version warning under --strict or strict: true, before anything is sent, and not the note" do
@@ -92,7 +94,7 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       expect { build(config: config("build: full\nrelease: 0.13.0\nstrict: true\n")).install(lock) }
         .to raise_error(described_class::Refused)
       expect(@canister.calls.map(&:first).uniq).to eq(["installed"])
-      expect(build(config: full, flags: { strict: true }).install(lockfile(%w[zlib 3.1.1]))).to include(match(/\Anote: zlib/))
+      expect(build(config: full, flags: { strict: true }).install(lockfile(%w[monitor 0.3.0]))).to include(match(/\Anote: monitor/))
     end
 
     it "uses the canister's list when it runs the target, and reports drift from the table" do
@@ -103,6 +105,8 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       expect(report).to include("skip json-2.7.1: linked into the full module, so it is not sent",
                                 "drift: the canister links newext, which this Installer's table lacks",
                                 match(/\Adrift: this Installer's table has .*zlib, which the canister does not link\z/))
+      expect(build(config: full).install(lockfile(%w[newext 1.0.0])))
+        .to include("note: newext-1.0.0 is locked; full links newext, a version this Installer does not mirror")
       expect { build(config: full).install(lockfile(%w[zlib 3.1.1])) }
         .to raise_error(RubyWasmIcInstaller::GemFiles::Refused, /zlib-3.1.1 has a C extension/)
     end

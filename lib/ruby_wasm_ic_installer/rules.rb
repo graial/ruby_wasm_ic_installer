@@ -16,14 +16,18 @@ module RubyWasmIcInstaller
     # A linked require name's gem, where it is not the name's first segment.
     GEM_OF = { "date_core" => "date" }.freeze
 
-    # The version of each linked gem a Build carries: Ruby 3.3.6's, from the
-    # builder's Release Bundle. The builder named these nine; a linked gem
-    # missing here is skipped with a note, not a warning.
+    # The version of each linked gem a Build carries: Ruby 3.3.6's, read by
+    # the builder from its Release Bundle's default gemspecs.
     LINKED_VERSIONS = {
-      "full" => { "bigdecimal" => "3.1.5", "date" => "3.3.4", "digest" => "3.1.1", "json" => "2.7.1",
-                  "nkf" => "0.1.3", "openssl" => "3.2.0", "psych" => "5.1.2", "stringio" => "3.1.1",
-                  "strscan" => "3.0.9" }.freeze
+      "full" => { "bigdecimal" => "3.1.5", "cgi" => "0.4.1", "date" => "3.3.4", "digest" => "3.1.1",
+                  "etc" => "1.4.3", "fcntl" => "1.1.0", "json" => "2.7.1", "nkf" => "0.1.3", "openssl" => "3.2.0",
+                  "pathname" => "0.3.0", "psych" => "5.1.2", "stringio" => "3.1.1", "strscan" => "3.0.9",
+                  "zlib" => "3.1.1" }.freeze
     }.freeze
+
+    # Linked names that Ruby 3.3.6 ships as part of Ruby, with no gemspec: a
+    # lock that pins a gem of one of these names gets a note, never a warning.
+    PART_OF_RUBY = %w[continuation coverage monitor objspace rbconfig ripper].freeze
 
     # The first Release with a `full` Build.
     FULL_FROM = ::Gem::Version.new("0.13.0")
@@ -71,6 +75,8 @@ module RubyWasmIcInstaller
     def linked_gems(names) = names.map { |n| GEM_OF.fetch(n) { n.split("/").first } }.uniq
 
     def linked_version(build, gem) = LINKED_VERSIONS.fetch(build, {})[gem]
+
+    def part_of_ruby?(gem) = PART_OF_RUBY.include?(gem)
 
     def release?(release) = !release.nil? && release != NO_RELEASE
 

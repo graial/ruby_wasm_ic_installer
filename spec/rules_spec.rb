@@ -18,10 +18,16 @@ RSpec.describe RubyWasmIcInstaller::Rules do
       .to eq(%w[json date digest cgi ripper])
   end
 
-  it "knows the version full links of the gems the builder named, and not of the others" do
+  it "knows the version full links of each linked gem, and which linked names are part of Ruby, not gems" do
     expect(r.linked_version("full", "json")).to eq("2.7.1")
-    expect(r.linked_version("full", "psych")).to eq("5.1.2")
-    expect(r.linked_version("full", "zlib")).to be_nil
+    expect(r.linked_version("full", "zlib")).to eq("3.1.1")
+    expect(r.linked_version("full", "cgi")).to eq("0.4.1")
+    expect(r::LINKED_VERSIONS["full"].size).to eq(14)
+    expect(r.linked_version("full", "monitor")).to be_nil
+    expect(r.part_of_ruby?("monitor")).to be(true)
+    expect(r.part_of_ruby?("zlib")).to be(false)
+    unmapped = r.linked_gems(r.linked(target("full"))) - r::LINKED_VERSIONS["full"].keys
+    expect(unmapped.all? { r.part_of_ruby?(_1) }).to be(true)
   end
 
   it "accepts every encoding from Release 0.13.0, and not before or when the Release is unknown" do

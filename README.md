@@ -196,13 +196,16 @@ the canister runs the old module, so the Installer uses its table.
 
 ```
 warning: json-2.9.1 is locked; full links json 2.7.1, which is what will load
-note: zlib-3.1.1 is locked; full links zlib, a version this Installer does not mirror
+note: monitor-0.3.0 is locked; full carries monitor as part of Ruby 3.3.6, not as a gem
 ```
 
-The versions mirrored are ruby_wasm_builder's: `bigdecimal` 3.1.5, `date`
-3.3.4, `digest` 3.1.1, `json` 2.7.1, `nkf` 0.1.3, `openssl` 3.2.0, `psych`
-5.1.2, `stringio` 3.1.1, `strscan` 3.0.9. A linked gem not among them gets a
-`note:`.
+The versions mirrored are ruby_wasm_builder's, from Ruby 3.3.6's default
+gemspecs: `bigdecimal` 3.1.5, `cgi` 0.4.1, `date` 3.3.4, `digest` 3.1.1,
+`etc` 1.4.3, `fcntl` 1.1.0, `json` 2.7.1, `nkf` 0.1.3, `openssl` 3.2.0,
+`pathname` 0.3.0, `psych` 5.1.2, `stringio` 3.1.1, `strscan` 3.0.9, `zlib`
+3.1.1. `monitor`, `objspace`, `coverage`, `ripper`, `continuation` and
+`rbconfig` are part of Ruby there, not gems: a lock that pins one gets a
+`note:`, as does a linked gem the canister reports that this table lacks.
 
 **`--strict`** (or `strict: true`) turns each `warning:` into a refusal (exit
 2, nothing sent), and refuses an **assumed** target too: one no flag, config
