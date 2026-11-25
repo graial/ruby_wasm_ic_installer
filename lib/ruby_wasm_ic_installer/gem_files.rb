@@ -25,13 +25,14 @@ module RubyWasmIcInstaller
       @fetcher = fetcher || method(:gem_fetch)
     end
 
-    def prepare(locked)
+    # `release`: the target Release's Gem::Version, or nil, for MagicComment.
+    def prepare(locked, release: nil)
       path = fetch(locked)
       check_sum!(locked, path)
       package = ::Gem::Package.new(path)
       spec = package.spec
       check_spec!(locked, spec)
-      files, rewrites = read_files(locked, package, spec)
+      files, rewrites = read_files(locked, package, spec, release)
       paths = spec.require_paths.select { |rp| files.keys.any? { _1.start_with?("#{rp}/") } }
       raise Refused, "#{locked.name_version} has no files under #{spec.require_paths.join(', ')}" if paths.empty?
 
@@ -106,7 +107,7 @@ module RubyWasmIcInstaller
                      "be added to ruby_wasm_builder"
     end
 
-    def read_files(locked, package, spec)
+    def read_files(locked, package, spec, release)
       files = {}
       rewrites = []
       Dir.mktmpdir do |dir|
@@ -125,7 +126,7 @@ module RubyWasmIcInstaller
             body = File.binread(full)
             path = "#{rp}/#{rel}"
             if rel.end_with?(".rb")
-              body, rewrite = MagicComment.fix("#{locked.name_version}/#{path}", body)
+              body, rewrite = MagicComment.fix("#{locked.name_version}/#{path}", body, release: release)
               rewrites << rewrite if rewrite
             end
             files[path] = body

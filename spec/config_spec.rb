@@ -14,6 +14,11 @@ RSpec.describe RubyWasmIcInstaller::Config do
     expect([c.build, c.release, c.verify]).to eq(["full", "0.13.0", %w[roda ruby_wasm_ic_rack]])
   end
 
+  it "reads strict, false when absent" do
+    expect(read("strict: true\n").strict).to be(true)
+    expect(read("").strict).to be(false)
+  end
+
   it "takes a numeric release as written" do
     expect(read("release: 0.13\n").release).to eq("0.13")
   end
@@ -33,6 +38,7 @@ RSpec.describe RubyWasmIcInstaller::Config do
     expect { read("build: huge\n") }.to raise_error(RubyWasmIcInstaller::Error, /build must be one of minimal, full/)
     expect { read("release: soon\n") }.to raise_error(RubyWasmIcInstaller::Error, /release must be a version/)
     expect { read("verify: roda\n") }.to raise_error(RubyWasmIcInstaller::Error, /verify must be a list/)
+    expect { read("strict: yes please\n") }.to raise_error(RubyWasmIcInstaller::Error, /strict must be true or false/)
     expect { read("buid: full\n") }.to raise_error(RubyWasmIcInstaller::Error, /unknown key buid/)
     expect { read("- a\n") }.to raise_error(RubyWasmIcInstaller::Error, /must be a YAML mapping/)
     expect { read("a: [\n") }.to raise_error(RubyWasmIcInstaller::Error, /not valid YAML/)
@@ -50,10 +56,15 @@ RSpec.describe RubyWasmIcInstaller::Target do
 
   it "takes the flags first, then the config, then the canister's report" do
     c = config("build: full\nrelease: 0.13.0\n")
-    t = described_class.resolve(flags: { build: "minimal" }, config: c, info: { build: "full", release: "0.12.0" })
+    t = described_class.resolve(flags: { build: "minimal" }, config: c, info: { build: "full", release: "0.14.0" })
     expect([t.build, t.build_source, t.release, t.release_source]).to eq(["minimal", "--build", "0.13.0", c.path])
-    t = described_class.resolve(flags: {}, config: config, info: { build: "full", release: "0.12.0" })
-    expect(t.describe).to eq("target: full 0.12.0 (build from the canister, release from the canister)")
+    t = described_class.resolve(flags: {}, config: config, info: { build: "full", release: "0.14.0" })
+    expect(t.describe).to eq("target: full 0.14.0 (build from the canister, release from the canister)")
+  end
+
+  it "takes a reported Release 0.0.0 as no Release" do
+    t = described_class.resolve(flags: {}, config: config, info: { build: "full", release: "0.0.0" })
+    expect([t.release, t.release_version, t.assumed?]).to eq([nil, nil, false])
   end
 
   it "assumes minimal, and says so, when nothing says otherwise" do
@@ -81,10 +92,5 @@ RSpec.describe RubyWasmIcInstaller::Rules do
     expect(described_class.refused(target("minimal", "0.12.0"), old)).to eq([])
     expect(described_class.refused(target("minimal"), old)).to eq([])
     expect(described_class.refused(target("minimal", "0.13.0"), [["ruby_wasm_ic_minimal", "0.1.5"]])).to eq([])
-  end
-
-  it "knows what a Build links" do
-    expect(described_class.linked(target("full"))).to eq(%w[stringio strscan])
-    expect(described_class.linked(target("minimal"))).to eq([])
   end
 end

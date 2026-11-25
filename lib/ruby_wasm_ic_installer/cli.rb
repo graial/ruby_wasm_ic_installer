@@ -37,6 +37,8 @@ module RubyWasmIcInstaller
         --build minimal|full    the target Build (else the config, else the canister's report,
                                 else minimal)
         --release VERSION       the target Release, likewise
+        --strict                refuse, not warn, when a linked gem's locked version is not the one the
+                                Build links, or when the target is assumed (or strict: true in the config)
         --config PATH           the config file (default: #{Config::FILE} in the project root)
         --budget BYTES          the largest batch, in bytes of Candid (default: #{Plan::DEFAULT_BUDGET})
         -h, --help, --version
@@ -98,6 +100,7 @@ module RubyWasmIcInstaller
         o.on("--build BUILD") { opts[:flags][:build] = Config.check_build(_1, "--build") }
         o.on("--release VERSION") { opts[:flags][:release] = Config.check_release(_1, "--release") }
         o.on("--config PATH") { opts[:config] = _1 }
+        o.on("--strict") { opts[:flags][:strict] = true }
         o.on("--check") { opts[:check] = true }
         o.on("--icp PATH") { opts[:icp] = _1 }
         o.on("--cache DIR") { opts[:cache] = _1 }

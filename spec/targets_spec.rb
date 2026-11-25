@@ -33,6 +33,13 @@ RSpec.describe RubyWasmIcInstaller::Installer do
                      "lib/ruby_wasm_ic_minimal/standins/stringio.rb" => "")
       @factory.build("net-http", "0.4.0", "lib/net/http.rb" => "")
       @factory.build("active_support_like", "1.0.0", "lib/other.rb" => "")
+      %w[2.9.1 2.7.1].each do |v|
+        @factory.build("json", v, { "lib/json.rb" => "", "ext/json/ext/parser/extconf.rb" => "" },
+                       extensions: ["ext/json/ext/parser/extconf.rb"])
+      end
+      @factory.build("zlib", "3.1.1", { "ext/zlib/extconf.rb" => "", "lib/zlib.rb" => "" }, extensions: ["ext/zlib/extconf.rb"])
+      @factory.build("eucgem", "1.0.0", "lib/eucgem.rb" => "# -*- coding: euc-jp -*-\nX = 1\n",
+                     "lib/eucgem/bin.rb" => "# encoding: binary\n")
       ex.run
     end
   end
@@ -58,6 +65,92 @@ RSpec.describe RubyWasmIcInstaller::Installer do
                      extensions: ["ext/e/extconf.rb"])
       expect { build(config: full).install(lockfile(%w[nokogiri_like 1.0.0])) }
         .to raise_error(RubyWasmIcInstaller::GemFiles::Refused, /has to be added to ruby_wasm_builder/)
+    end
+  end
+
+  describe "linked gems on full" do
+    let(:full) { config("build: full\nrelease: 0.13.0\n") }
+
+    it "skips every gem a linked extension maps to, not refusing it as compiled" do
+      report = build(config: full).install(lockfile(%w[rack 3.1.8], %w[json 2.7.1], %w[zlib 3.1.1]))
+      expect(report).to include("skip json-2.7.1: linked into the full module, so it is not sent",
+                                "skip zlib-3.1.1: linked into the full module, so it is not sent")
+      expect(@factory.fetched).to eq(["rack-3.1.8"])
+    end
+
+    it "warns when the locked version is not the one full links, and notes a version it does not mirror" do
+      report = build(config: full).install(lockfile(%w[json 2.9.1], %w[zlib 3.1.1]))
+      expect(report).to include("warning: json-2.9.1 is locked; full links json 2.7.1, which is what will load",
+                                "note: zlib-3.1.1 is locked; full links zlib, a version this Installer does not mirror")
+      expect(build(config: full).install(lockfile(%w[json 2.7.1])).grep(/warning|note/)).to eq([])
+    end
+
+    it "refuses the version warning under --strict or strict: true, before anything is sent, and not the note" do
+      lock = lockfile(%w[rack 3.1.8], %w[json 2.9.1])
+      expect { build(config: full, flags: { strict: true }).install(lock) }
+        .to raise_error(described_class::Refused, /refused \(strict\): nothing was sent:\n  json-2.9.1 is locked; full links json 2.7.1/)
+      expect { build(config: config("build: full\nrelease: 0.13.0\nstrict: true\n")).install(lock) }
+        .to raise_error(described_class::Refused)
+      expect(@canister.calls.map(&:first).uniq).to eq(["installed"])
+      expect(build(config: full, flags: { strict: true }).install(lockfile(%w[zlib 3.1.1]))).to include(match(/\Anote: zlib/))
+    end
+
+    it "uses the canister's list when it runs the target, and reports drift from the table" do
+      @canister.build = "full"
+      @canister.release = "0.13.0"
+      @canister.linked = %w[stringio json/ext/parser json/ext/generator newext]
+      report = build(config: full).install(lockfile(%w[rack 3.1.8], %w[json 2.7.1]))
+      expect(report).to include("skip json-2.7.1: linked into the full module, so it is not sent",
+                                "drift: the canister links newext, which this Installer's table lacks",
+                                match(/\Adrift: this Installer's table has .*zlib, which the canister does not link\z/))
+      expect { build(config: full).install(lockfile(%w[zlib 3.1.1])) }
+        .to raise_error(RubyWasmIcInstaller::GemFiles::Refused, /zlib-3.1.1 has a C extension/)
+    end
+
+    it "uses the table in a transition, when the canister's list is for the module it runs now" do
+      @canister.build = "minimal"
+      @canister.release = "0.13.0"
+      @canister.linked = []
+      report = build(config: full).install(lockfile(%w[json 2.7.1]))
+      expect(report).to include("skip json-2.7.1: linked into the full module, so it is not sent")
+      expect(report.grep(/drift/)).to eq([])
+    end
+
+    it "takes a dry run's module (release 0.0.0) as no Release: no transition, but its list counts on its Build" do
+      @canister.build = "full"
+      @canister.release = "0.0.0"
+      @canister.linked = %w[json/ext/parser]
+      report = build(config: full).install(lockfile(%w[rack 3.1.8]))
+      expect(report.grep(/transition/)).to eq([])
+      expect(report).to include(match(/\Adrift: this Installer's table has/))
+      expect(build.status).to include("target: full (build from the canister)")
+    end
+
+    it "refuses full before Release 0.13.0, which had no full" do
+      expect { build(config: config("build: full\nrelease: 0.12.0\n")).install(lockfile(%w[rack 3.1.8])) }
+        .to raise_error(RubyWasmIcInstaller::Error, /`full` exists from ruby_wasm_builder 0.13.0/)
+    end
+  end
+
+  describe "--strict and an assumed target" do
+    it "refuses when nothing says what the target is" do
+      expect { build(flags: { strict: true }).install(lockfile(%w[rack 3.1.8])) }
+        .to raise_error(described_class::Refused, /refused \(strict\).*\n  the target is assumed/m)
+      expect(build(config: config("build: minimal\n"), flags: { strict: true }).install(lockfile(%w[rack 3.1.8])))
+        .to include(match(/\Asend rack-3.1.8/))
+    end
+  end
+
+  describe "magic comments by Release" do
+    it "sends files in any encoding Ruby knows, unrewritten, from 0.13.0" do
+      report = build(config: config("build: minimal\nrelease: 0.13.0\n")).install(lockfile(%w[eucgem 1.0.0]))
+      expect(report.grep(/rewrite/)).to eq([])
+      expect(File.read(File.join(@canister.dir, "gems/eucgem-1.0.0/lib/eucgem/bin.rb"))).to eq("# encoding: binary\n")
+    end
+
+    it "keeps the three-encoding rule when the Release is unknown, and says how to lift it" do
+      expect { build.install(lockfile(%w[eucgem 1.0.0])) }
+        .to raise_error(RubyWasmIcInstaller::MagicComment::Refused, /declare `release:`/)
     end
   end
 
@@ -87,7 +180,7 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       @canister.build = "minimal"
       @canister.release = "0.12.0"
       report = build(config: config("build: full\nrelease: 0.13.0\n")).install(lockfile(%w[rack 3.1.8]))
-      expect(report).to include("canister: protocol 2, build minimal, release 0.12.0",
+      expect(report).to include("canister: protocol 3, build minimal, release 0.12.0",
                                 "transition: the canister runs minimal 0.12.0; this is for full 0.13.0")
     end
 
@@ -113,6 +206,12 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       build(config: config("build: minimal\nrelease: 0.12.0\n")).install(lockfile(%w[ruby_wasm_ic_minimal 0.1.4]))
       st = build(config: config("build: minimal\nrelease: 0.13.0\n")).status
       expect(st).to include(match(/\Arefuses minimal 0.13.0: ruby_wasm_ic_minimal-0.1.4: .*update it to 0.1.5/))
+    end
+
+    it "says so when the canister half is protocol 2, and still works" do
+      @canister.protocol_two!
+      expect(build.status).to include(match(/\Acanister half: protocol 2, which reports no linked extensions: re-run/))
+      expect(build.install(lockfile(%w[rack 3.1.8]))).to include("setup generation 1 takes effect at the next upgrade")
     end
 
     it "says so when the canister half is protocol 1, and still works" do
@@ -241,7 +340,7 @@ RSpec.describe "gems first, then a new module" do
       canister.release = "0.13.0"
       canister.upgrade!
       expect(require("rack")).to be(true)
-      expect(installer.status).to include("canister: protocol 2, build full, release 0.13.0")
+      expect(installer.status).to include("canister: protocol 3, build full, release 0.13.0")
     end
   end
 end

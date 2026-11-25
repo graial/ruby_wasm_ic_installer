@@ -9,15 +9,16 @@ module RubyWasmIcInstaller
   #   build: full          # minimal | full
   #   release: 0.13.0      # the ruby_wasm_builder Release
   #   verify: [roda]       # require names `verify` checks on the canister
+  #   strict: true         # refuse, not warn, on a linked version or an assumed target
   #
   # Every key is optional. The file is the desired state; the canister is the
   # observed state; the Installer reconciles them and keeps no state of its own.
   class Config
     FILE = ".ruby_wasm_ic_installer.yml"
     BUILDS = %w[minimal full].freeze
-    KEYS = %w[build release verify].freeze
+    KEYS = %w[build release verify strict].freeze
 
-    attr_reader :build, :release, :verify, :path
+    attr_reader :build, :release, :verify, :strict, :path
 
     def self.default_path(project_root) = File.join(project_root || ".", FILE)
 
@@ -43,6 +44,7 @@ module RubyWasmIcInstaller
       @build = self.class.check_build(data["build"], path)
       @release = self.class.check_release(data["release"], path)
       @verify = check_verify(data["verify"])
+      @strict = check_strict(data["strict"])
     end
 
     def self.check_build(value, where)
@@ -66,6 +68,13 @@ module RubyWasmIcInstaller
       return value if value.is_a?(Array) && value.all?(String)
 
       raise Error, "#{@path}: verify must be a list of require names"
+    end
+
+    def check_strict(value)
+      return false if value.nil?
+      return value if [true, false].include?(value)
+
+      raise Error, "#{@path}: strict must be true or false, not #{value.inspect}"
     end
   end
 end

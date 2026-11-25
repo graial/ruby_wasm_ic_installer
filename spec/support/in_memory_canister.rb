@@ -16,12 +16,14 @@ class InMemoryCanister
 
   attr_reader :dir, :calls, :deploys
 
-  # What the canister reports of its module, as the builder would once it
-  # says so (IC::BUILD, IC::RELEASE); nil reports nothing. `protocol_one!`
-  # answers as the 0.1.x canister half did: no new fields, no install_verify.
-  attr_accessor :build, :release
+  # What the canister reports of its module, as the builder does from 0.14.0
+  # (IC::BUILD, IC::RELEASE, IC::LINKED_EXTENSIONS); nil reports nothing.
+  # `protocol_one!` answers as the 0.1.x canister half did: no new fields, no
+  # install_verify. `protocol_two!` answers as 0.2.x's did: no `linked`.
+  attr_accessor :build, :release, :linked
 
-  def protocol_one! = @protocol_one = true
+  def protocol_one! = @protocol = 1
+  def protocol_two! = @protocol = 2
 
   def initialize(dir)
     @dir = dir
@@ -82,10 +84,10 @@ class InMemoryCanister
       install_commit(r)
     when "install_remove" then install_remove(values.first)
     when "install_verify"
-      raise ArgumentError, "no method install_verify" if @protocol_one
+      raise ArgumentError, "no method install_verify" if @protocol == 1
 
       install_verify(values.first)
-    when "installed" then installed.merge(build: build, release: release)
+    when "installed" then installed.merge(build: build, release: release, linked: linked)
     else raise ArgumentError, "no method #{method}"
     end
   end
@@ -102,14 +104,18 @@ class InMemoryCanister
                "gems" => C.texts_value(value[:gems]), "partial" => C.texts_value(value[:partial]),
                "load_paths" => C.texts_value(value[:load_paths]),
                "running_paths" => C.texts_value(value[:running_paths]) }
-    unless @protocol_one
+    unless @protocol == 1
       fields += [["protocol", C.sleb(C::NAT64)], ["build", C.sleb(3)], ["release", C.sleb(3)],
                  ["load_failures", C.sleb(2)]]
-      values.merge!("protocol" => C.nat64_value(value[:protocol]), "build" => opt_text.(value[:build]),
+      values.merge!("protocol" => C.nat64_value(@protocol || value[:protocol]), "build" => opt_text.(value[:build]),
                     "release" => opt_text.(value[:release]), "load_failures" => C.texts_value(value[:load_failures]))
     end
+    unless @protocol
+      fields << ["linked", C.sleb(4)]
+      values["linked"] = value[:linked].nil? ? "\x00".b : "\x01".b + C.texts_value(value[:linked])
+    end
     table = C.types(C.record_type(fields), "\x6e".b + C.sleb(C::NAT64), "\x6d".b + C.sleb(C::TEXT),
-                    "\x6e".b + C.sleb(C::TEXT))
+                    "\x6e".b + C.sleb(C::TEXT), "\x6e".b + C.sleb(2))
     body = C.record_value(values)
     C::MAGIC + table + C.leb(1) + C.sleb(0) + body
   end

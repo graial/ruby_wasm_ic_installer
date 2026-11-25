@@ -52,6 +52,12 @@ RSpec.describe RubyWasmIcInstaller::CLI do
       expect(@out.string).to include("target: full (build from #{path}")
     end
 
+    it "exits 2 under --strict when the target is assumed, and installs once it is declared" do
+      expect(cli("install", "my_app", "--lock", @lock, "--strict")).to eq(2)
+      expect(@err.string).to include("refused (strict): nothing was sent:", "  the target is assumed")
+      expect(cli("install", "my_app", "--lock", @lock, "--strict", "--build", "minimal")).to eq(0)
+    end
+
     it "exits 2 on a bad --build, a bad --release or a bad config" do
       expect(cli("status", "my_app", "--build", "huge")).to eq(2)
       expect(@err.string).to include("build must be one of")

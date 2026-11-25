@@ -30,20 +30,23 @@ own parser (it resolves nothing: the lock is yours) and, for each locked gem:
   installed;
 - **skips** it, saying so, if the target already has it: on `minimal`, when
   `ruby_wasm_ic_minimal` is in the lock and stands in for it (`stringio`,
-  `strscan`, `date`); on `full`, the extensions it links (`stringio`,
-  `strscan`). The real ones are C extensions;
+  `strscan`, `date`); on `full`, when one of the extensions it links belongs
+  to it (`json`, `psych`, `date`, `bigdecimal`, `openssl`, `zlib`, `stringio`
+  and the rest: see [Linked gems](#linked-gems-on-full));
 - opens only its `require_paths` (normally `lib/`);
-- **rewrites magic comments** naming an alias of an encoding a `minimal`
-  canister claims (`# encoding: binary` to `ascii-8bit`, `ascii` to
-  `us-ascii`), and **refuses** a file in any other encoding (`ISO-8859-1`,
-  `Shift_JIS`, `EUC-JP`, `UTF-16LE`). A canister claims three encodings,
-  UTF-8, US-ASCII and ASCII-8BIT, each by one name and no alias, and reads the
-  comment before any Ruby runs. It lists nine more names (the UTF-16 and
-  UTF-32 family, UTF8-MAC, EUC-JP, Windows-31J) with no encoding behind them:
-  a file whose comment names one would load as ASCII-8BIT, so it is refused
-  too. Every rewrite is in the report. (This is `minimal`'s rule and is
-  applied to every target for now; a `full` canister has not needed an install
-  yet, so it is revisited then.)
+- checks each file's **magic comment** against the target's Release. From
+  ruby_wasm_builder 0.13.0 both Builds link every Ruby 3.3 encoding, so any
+  encoding Ruby knows is sent as written; only one Ruby cannot read source in
+  (UTF-16, UTF-32) is refused. Before 0.13.0, **or when the Release is not
+  known**, a canister claims three encodings, UTF-8, US-ASCII and ASCII-8BIT,
+  each by one name and no alias, and reads the comment before any Ruby runs:
+  an alias of one is **rewritten** (`# encoding: binary` to `ascii-8bit`,
+  `ascii` to `us-ascii`), and any other encoding is **refused** (`ISO-8859-1`,
+  `Shift_JIS`, `EUC-JP`), with a hint to declare `release:`. Such a canister
+  also lists nine names (the UTF-16 and UTF-32 family, UTF8-MAC, EUC-JP,
+  Windows-31J) with no encoding behind them: a file whose comment names one
+  would load as ASCII-8BIT, so it is refused too. Every rewrite is in the
+  report.
 
 It asks the canister what it has (`installed`), and sends **only the gem
 versions it lacks**, packed into calls of up to 2,000,000 bytes (the IC's
@@ -94,7 +97,8 @@ ruby_wasm_ic_installer setup my_app [--yes | --check]
   type :InstallCommit, record(gems: Vec[Text], setup: Opt[:InstallSetup])
   type :Installed,     record(running: Opt[Nat64], pending: Opt[Nat64], gems: Vec[Text], partial: Vec[Text],
                               load_paths: Vec[Text], running_paths: Vec[Text], protocol: Nat64,
-                              build: Opt[Text], release: Opt[Text], load_failures: Vec[Text])
+                              build: Opt[Text], release: Opt[Text], load_failures: Vec[Text],
+                              linked: Opt[Vec[Text]])
   update :install_put,    takes: [Vec[:InstallFile]], returns: Text
   update :install_commit, takes: [:InstallCommit],    returns: Text
   update :install_remove, takes: [Text],              returns: Text
@@ -143,19 +147,23 @@ What a gem needs depends on the module the canister runs: its **Build**
 build: full          # minimal | full
 release: 0.13.0
 verify: [roda, ruby_wasm_ic_rack]    # require names `verify` checks on the canister
+strict: true         # refuse, not warn (see below); or --strict
 ```
 
 Every key is optional. The target is resolved, highest first, from `--build`
 and `--release`, this file, what the canister reports (`IC::BUILD` and
-`IC::RELEASE`, once the builder sets them), and last the assumption `minimal`,
-which prints a line saying so. The file is the desired state and the canister
-the observed one; the Installer keeps no state of its own, so a move from one
-Build or Release to another shows as a **transition** line until the canister
-has been upgraded.
+`IC::RELEASE`, set by ruby_wasm_builder from 0.14.0), and last the assumption
+`minimal`, which prints a line saying so. A canister reporting Release `0.0.0`
+runs a CI dry run's module, which is no Release: it sets no Release and shows
+no transition. The file is the desired state and the canister the observed
+one; the Installer keeps no state of its own, so a move from one Build or
+Release to another shows as a **transition** line until the canister has been
+upgraded. `full` exists from 0.13.0: `build: full` with an earlier `release:`
+is an error.
 
 On the target, `install` and `status`:
 
-- on `full`, skip `stringio` and `strscan` as linked, and **refuse**
+- on `full`, skip the gems it links (below), and **refuse**
   `ruby_wasm_ic_minimal` by name ("remove it from the Gemfile: `full` links
   the real extensions") before anything is sent;
 - refuse a gem version known to refuse the target (`ruby_wasm_ic_minimal`
@@ -164,6 +172,41 @@ On the target, `install` and `status`:
 - refuse any other compiled gem: add it to ruby_wasm_builder, not here.
 
 The tables behind this are in this gem (`Rules`); a new row is a release.
+
+### Linked gems on `full`
+
+`full` links 26 C extensions, named by require name: `bigdecimal`,
+`cgi/escape`, `continuation`, `coverage`, `date_core`, `digest` and
+`digest/*`, `etc`, `fcntl`, `json/ext/generator`, `json/ext/parser`,
+`monitor`, `nkf`, `objspace`, `openssl`, `pathname`, `psych`,
+`rbconfig/sizeof`, `ripper`, `stringio`, `strscan`, `zlib`. Each maps to a
+gem by its first segment (`json/ext/parser` to `json`), and `date_core` to
+`date`; a locked gem of one of those names is skipped. Its Ruby half (`json.rb`,
+`psych.rb` …) is Ruby 3.3.6's, shipped in the module.
+
+Where the list comes from: the canister reports it (`IC::LINKED_EXTENSIONS`,
+from builder 0.14.0) when it already runs the target's Build and Release, and
+the Installer uses that, printing a **drift** line if it differs from this
+gem's table. Otherwise, and that is the usual case when you send gems first,
+the canister runs the old module, so the Installer uses its table.
+
+**What loads is the module's version, not the lock's.** Skipping a locked
+`json 2.9.1` gives the Application the `json` Ruby 3.3.6 ships, 2.7.1, and
+`install` says so:
+
+```
+warning: json-2.9.1 is locked; full links json 2.7.1, which is what will load
+note: zlib-3.1.1 is locked; full links zlib, a version this Installer does not mirror
+```
+
+The versions mirrored are ruby_wasm_builder's: `bigdecimal` 3.1.5, `date`
+3.3.4, `digest` 3.1.1, `json` 2.7.1, `nkf` 0.1.3, `openssl` 3.2.0, `psych`
+5.1.2, `stringio` 3.1.1, `strscan` 3.0.9. A linked gem not among them gets a
+`note:`.
+
+**`--strict`** (or `strict: true`) turns each `warning:` into a refusal (exit
+2, nothing sent), and refuses an **assumed** target too: one no flag, config
+or canister report names. A `note:` never refuses.
 
 **Gems first, then the module.** A new setup file takes effect at the next
 upgrade, **whatever module that upgrade brings**: the canister half boots
@@ -188,6 +231,14 @@ writes a first list: the require name each locked gem's gemspec points at
 from the gemspec's file list alone, with no gem code run; it names the gems it
 found nothing for.
 
+**What a `verify` call costs.** `install_verify` is one query, and a query
+may spend 5 B instructions. A name the boot already loaded costs almost
+nothing; one it did not pays for its first `require`, about 0.84 B for Rack
+(ruby_wasm_builder's W47). A list naming several gems the boot did not load
+can pass the limit, and that shows as a failed call, not a `FAIL` row: keep
+`verify:` to what `app.rb` requires at boot, or split a long list across
+config files run with `--config`.
+
 `install --upgrade` sends, runs `icp deploy <canister> --mode upgrade`, and
 verifies, exiting 1 if anything failed to load. A CI job can filter on
 `Gemfile*` and pass `--upgrade` only then. `icp deploy` builds and installs
@@ -208,7 +259,7 @@ ruby_wasm_ic_installer setup   APP_DIR  [--yes | --check]
 options pass through to `icp canister call`: `-e/--environment`,
 `-n/--network`, `--identity`, `--project-root` (icp's
 `--project-root-override`) and `--icp PATH`. Other options: `--cache DIR`,
-`--budget BYTES`, `--build`, `--release`, `--config PATH`.
+`--budget BYTES`, `--build`, `--release`, `--config PATH`, `--strict`.
 
 An icp-cli error (a project that will not load, say, or a missing file icp
 reads) is printed as icp-cli's own message under a header saying so, so it does
@@ -230,15 +281,18 @@ target refuses.
 - **Gems from a gem server only;** a `git` or `path` source in the lock is
   refused.
 - **A single file larger than one call** (about 2 MB) cannot be sent.
-- **Three encodings:** UTF-8, US-ASCII and ASCII-8BIT, the ones a `minimal`
-  canister claims (ruby_wasm_builder's ADR-0053; the other nine names it lists
-  were probed on 0.8.0 and are names only, W30). A Build that links encodings
-  is a release of this gem.
+- **Three encodings before Release 0.13.0,** or when the Release is unknown:
+  UTF-8, US-ASCII and ASCII-8BIT, the ones a `minimal` canister claims
+  (ruby_wasm_builder's ADR-0053; the other nine names it lists were probed on
+  0.8.0 and are names only, W30). From 0.13.0, every Ruby 3.3 encoding. The
+  check runs on your machine's Ruby, which knows the same encodings.
 - **Two halves, one version.** The canister half is vendored into the
   Application, so it can be older than this gem. `installed` reports a
-  `protocol` number (2 from 0.2.0); against protocol 1 the Installer still
-  installs, says the canister half reports no Build and no load failures, and
-  `verify` asks you to re-run `setup`.
+  `protocol` number (3 from 0.3.0). Against protocol 2 the Installer still
+  installs, from its own table of linked extensions, and `status` asks you to
+  re-run `setup`; against protocol 1 it still installs, says the canister half
+  reports no Build and no load failures, and `verify` asks you to re-run
+  `setup`.
 - The canister keeps no content hash of what it holds yet: `installed` reports
   versions, not digests.
 

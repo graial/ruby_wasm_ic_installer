@@ -33,7 +33,8 @@ module RubyWasmIcInstaller
       type :InstallCommit, record(gems: Vec[Text], setup: Opt[:InstallSetup])
       type :Installed,     record(running: Opt[Nat64], pending: Opt[Nat64], gems: Vec[Text], partial: Vec[Text],
                                   load_paths: Vec[Text], running_paths: Vec[Text], protocol: Nat64,
-                                  build: Opt[Text], release: Opt[Text], load_failures: Vec[Text])
+                                  build: Opt[Text], release: Opt[Text], load_failures: Vec[Text],
+                                  linked: Opt[Vec[Text]])
       update :install_put,    takes: [Vec[:InstallFile]], returns: Text
       update :install_commit, takes: [:InstallCommit],    returns: Text
       update :install_remove, takes: [Text],              returns: Text

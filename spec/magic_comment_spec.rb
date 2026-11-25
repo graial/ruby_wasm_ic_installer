@@ -53,6 +53,35 @@ RSpec.describe RubyWasmIcInstaller::MagicComment do
     expect { m.fix("f.rb", "# encoding: klingon\n") }.to raise_error(m::Refused, /"klingon", which Ruby does not know/)
   end
 
+  it "hints at declaring the Release when it does not know it, and not when the Release is before 0.13.0" do
+    expect { m.fix("f.rb", "# coding: euc-jp\n") }.to raise_error(m::Refused, /declare `release:`/)
+    expect { m.fix("f.rb", "# coding: euc-jp\n", release: Gem::Version.new("0.12.0")) }
+      .to raise_error(m::Refused) { expect(_1.message).not_to include("declare") }
+  end
+
+  describe "from Release 0.13.0, which links every Ruby 3.3 encoding" do
+    v = Gem::Version.new("0.13.0")
+
+    it "accepts any encoding Ruby knows, and rewrites nothing" do
+      ["# encoding: euc-jp\n", "# coding: Shift_JIS\n", "# encoding: iso-8859-1\n", "# -*- encoding: binary -*-\n",
+       "# encoding: ascii\n", "# coding: SJIS\n"].each do |src|
+        expect(m.fix("f.rb", src, release: v)).to eq([src, nil])
+      end
+    end
+
+    it "still refuses a name Ruby does not know, and an encoding Ruby cannot read source in" do
+      expect { m.fix("f.rb", "# encoding: klingon\n", release: v) }.to raise_error(m::Refused, /does not know/)
+      expect { m.fix("f.rb", "# encoding: utf-16le\n", release: v) }
+        .to raise_error(m::Refused, /UTF-16LE.*not ASCII-compatible/)
+    end
+
+    # The check runs on the host's Ruby (4.0 today), not the canister's 3.3:
+    # this fails loudly if a host Ruby drops an encoding 3.3 has.
+    it "finds the Japanese encodings on the host Ruby" do
+      %w[EUC-JP Shift_JIS Windows-31J ISO-2022-JP CP51932 eucJP-ms].each { expect(Encoding.find(_1)).to be_a(Encoding) }
+    end
+  end
+
   it "holds the three ADR-0053 claims, and the nine W26 observed beside them" do
     expect(m::CLAIMED_ENCODINGS).to eq(%w[ASCII-8BIT UTF-8 US-ASCII])
     expect(m::UNCLAIMED_ENCODINGS.size).to eq(9)

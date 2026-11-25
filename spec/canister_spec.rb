@@ -22,15 +22,15 @@ RSpec.describe RubyWasmIcInstaller::Canister do
   def refused(&blk) = expect(&blk).to(raise_error(IC::Refusal))
   def gems_dir = File.join(@data, "gems")
 
-  describe "installed, as protocol 2" do
-    it "reports the protocol, the builder's Build and Release when it says them, and no load failures" do
-      expect(installed).to include(protocol: 2, build: nil, release: nil, load_failures: [])
+  describe "installed, as protocol 3" do
+    it "reports the protocol, the builder's Build, Release and linked extensions when it says them, and no load failures" do
+      expect(installed).to include(protocol: 3, build: nil, release: nil, linked: nil, load_failures: [])
       IC.const_set(:BUILD, "full")
-      IC.const_set(:RELEASE, "0.13.0")
-      expect(installed).to include(build: "full", release: "0.13.0")
+      IC.const_set(:RELEASE, "0.0.0")
+      IC.const_set(:LINKED_EXTENSIONS, %w[json/ext/parser stringio].freeze)
+      expect(installed).to include(build: "full", release: "0.0.0", linked: %w[json/ext/parser stringio])
     ensure
-      IC.send(:remove_const, :BUILD) if IC.const_defined?(:BUILD)
-      IC.send(:remove_const, :RELEASE) if IC.const_defined?(:RELEASE)
+      %i[BUILD RELEASE LINKED_EXTENSIONS].each { IC.send(:remove_const, _1) if IC.const_defined?(_1) }
     end
   end
 

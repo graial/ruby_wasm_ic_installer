@@ -3,7 +3,8 @@
 # installed) and required at the top of its app.rb. `ruby_wasm_ic_installer
 # setup <app_dir>` writes that require and the Declarations it serves.
 #
-# Core Ruby and the builder's IC only (IC.caller, IC.refuse, IC::DATA_DIR):
+# Core Ruby and the builder's IC only (IC.caller, IC.refuse, IC::DATA_DIR,
+# and, from builder 0.14.0, IC::BUILD, IC::RELEASE, IC::LINKED_EXTENSIONS):
 # it loads on a `minimal` canister, so it names no Encoding constant and
 # requires nothing.
 #
@@ -21,8 +22,8 @@ module RubyWasmIcInstaller
   module Canister
     # The version of this half's API, reported by `installed`. 1 had no
     # protocol field; 2 adds protocol, build, release, load_failures and
-    # install_verify.
-    PROTOCOL = 2
+    # install_verify; 3 adds linked.
+    PROTOCOL = 3
     MAX_FAILURES = 50
 
     # Prepended to Object so every `require` passes through. It records an
@@ -164,6 +165,7 @@ module RubyWasmIcInstaller
           protocol: PROTOCOL,
           build: builder_const(:BUILD),
           release: builder_const(:RELEASE),
+          linked: builder_list(:LINKED_EXTENSIONS),
           load_failures: (@failures || []).dup
         }
       end
@@ -178,11 +180,18 @@ module RubyWasmIcInstaller
       private
 
       # What the builder says about this module, once it says it (IC::BUILD,
-      # IC::RELEASE); nil until then.
+      # IC::RELEASE, IC::LINKED_EXTENSIONS); nil until then. Reported as
+      # given: the Installer interprets them.
       def builder_const(name)
         return nil unless defined?(IC) && IC.const_defined?(name)
 
         IC.const_get(name).to_s
+      end
+
+      def builder_list(name)
+        return nil unless defined?(IC) && IC.const_defined?(name)
+
+        IC.const_get(name).map(&:to_s)
       end
 
       def describe(error) = "#{error.class}: #{error.message.lines.first.to_s.strip}"

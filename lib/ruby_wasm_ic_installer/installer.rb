@@ -14,11 +14,12 @@ module RubyWasmIcInstaller
   class Installer
     MINIMAL = "ruby_wasm_ic_minimal"
     REQUIRED = %i[running pending gems partial load_paths running_paths].freeze
-    # Fields a protocol-1 canister half does not have.
-    OPTIONAL = { protocol: 1, build: nil, release: nil, load_failures: [] }.freeze
+    # Fields a protocol-1 canister half does not have (and `linked`, a
+    # protocol-2 one).
+    OPTIONAL = { protocol: 1, build: nil, release: nil, load_failures: [], linked: nil }.freeze
 
-    # The target would load a gem that refuses it, or the lock holds a
-    # compiled gem: nothing was sent.
+    # The target would load a gem that refuses it, the lock holds a compiled
+    # gem, or --strict met a warning: nothing was sent.
     class Refused < Error; end
 
     # `verify` found failures; `lines` is the whole report.
@@ -47,7 +48,7 @@ module RubyWasmIcInstaller
         "pending generation: #{i[:pending] || 'none'}#{pending_note(i)}",
         "installed: #{i[:gems].empty? ? 'none' : i[:gems].join(', ')}",
         *(i[:partial].empty? ? [] : ["half-sent (.partial): #{i[:partial].join(', ')}"]),
-        *canister_lines(i), target.describe, *transition_lines(i, target),
+        *canister_lines(i), target.describe, *transition_lines(i, target), *linked(target, i).last,
         *refusal_lines(target, i), *failure_lines(i)
       ]
     end
@@ -57,14 +58,18 @@ module RubyWasmIcInstaller
     def install(lockfile, dry_run: false, upgrade: false)
       i = installed
       target = Target.resolve(flags: @flags, config: @config, info: i)
-      report = [*canister_lines(i), target.describe, *transition_lines(i, target)]
+      names, drift = linked(target, i)
+      report = [*canister_lines(i), target.describe, *transition_lines(i, target), *drift]
       locked = lockfile.gems
       refuse!(target, locked.map { [_1.name, _1.version] }, report)
 
-      skip = skips(target, locked)
+      skip = skips(target, locked, names)
       skipped, wanted = locked.partition { skip.key?(_1.name) }
       skipped.each { report << "skip #{_1.name_version}: #{skip[_1.name]}" }
-      prepared = wanted.map { @gem_files.prepare(_1) }
+      warnings, notes = linked_versions(target, skipped, Rules.linked_gems(names))
+      report.concat(warnings.map { "warning: #{_1}" }, notes.map { "note: #{_1}" })
+      strict!(target, warnings, report)
+      prepared = wanted.map { @gem_files.prepare(_1, release: target.release_version) }
       prepared.flat_map(&:rewrites).each do |r|
         report << "rewrite #{r.file}:#{r.line}: magic comment #{r.from} -> #{r.to}"
       end
@@ -113,7 +118,7 @@ module RubyWasmIcInstaller
       i = installed
       target = Target.resolve(flags: @flags, config: @config, info: i)
       locked = lockfile.gems
-      skip = skips(target, locked)
+      skip = skips(target, locked, linked(target, i).first)
       found = []
       unresolved = []
       locked.reject { skip.key?(_1.name) }.each do |g|
@@ -170,17 +175,66 @@ module RubyWasmIcInstaller
       Candid.decode(@runner.call("install_verify", Candid.texts_arg(names), query: true)).first
     end
 
-    # What the target does not need sent: the stand-ins a minimal canister
-    # has (named by the lock's ruby_wasm_ic_minimal), or what the Build links.
-    def skips(target, locked)
-      if target.build == "full"
-        Rules.linked(target).to_h { [_1, "linked into the full module, so it is not sent"] }
-      else
-        minimal = locked.find { _1.name == MINIMAL }
-        (minimal ? @gem_files.standins(minimal) : []).to_h do
-          [_1, "#{MINIMAL} stands in for #{_1} on a minimal canister"]
+    # What the target does not need sent: the gems its linked extensions
+    # (`names`, require names) belong to, and on minimal the stand-ins the
+    # lock's ruby_wasm_ic_minimal carries.
+    def skips(target, locked, names)
+      skip = Rules.linked_gems(names).to_h { [_1, "linked into the #{target.build} module, so it is not sent"] }
+      minimal = target.build == "minimal" && locked.find { _1.name == MINIMAL }
+      return skip unless minimal
+
+      @gem_files.standins(minimal).to_h { [_1, "#{MINIMAL} stands in for #{_1} on a minimal canister"] }.merge(skip)
+    end
+
+    # The require names the target links, and the drift lines: the canister's
+    # own list when it runs the target, else (a transition, or a canister half
+    # or module that does not report one) this gem's table.
+    def linked(target, i)
+      table = Rules.linked(target)
+      reported = i[:linked]
+      return [table, []] if reported.nil? || !runs_target?(i, target)
+
+      drift = []
+      extra = reported - table
+      missing = table - reported
+      drift << "drift: the canister links #{extra.join(', ')}, which this Installer's table lacks" if extra.any?
+      drift << "drift: this Installer's table has #{missing.join(', ')}, which the canister does not link" if missing.any?
+      [reported, drift]
+    end
+
+    # The canister runs the target's Build, and its Release when both say a
+    # real one.
+    def runs_target?(i, target)
+      rel = Rules.release?(i[:release]) ? i[:release] : nil
+      i[:build] == target.build && (target.release.nil? || rel.nil? || rel == target.release)
+    end
+
+    # [warnings, notes] for the skipped linked gems: a locked version other
+    # than the one the Build links, or one this gem does not mirror.
+    def linked_versions(target, skipped, linked_gems)
+      warnings = []
+      notes = []
+      skipped.select { linked_gems.include?(_1.name) }.each do |g|
+        have = Rules.linked_version(target.build, g.name)
+        if have.nil?
+          notes << "#{g.name_version} is locked; #{target.build} links #{g.name}, a version this Installer does not mirror"
+        elsif have != g.version
+          warnings << "#{g.name_version} is locked; #{target.build} links #{g.name} #{have}, which is what will load"
         end
       end
+      [warnings, notes]
+    end
+
+    # --strict (or strict: true) refuses what is otherwise a warning: a linked
+    # version other than the lock's, and a target nothing declared or reported.
+    def strict!(target, warnings, report)
+      return unless @flags[:strict] || @config.strict
+
+      msgs = warnings.dup
+      msgs << "the target is assumed (#{target.build_source}): declare build: and release:" if target.assumed?
+      return if msgs.empty?
+
+      raise Refused, (report + ["refused (strict): nothing was sent:"] + msgs.map { "  #{_1}" }).join("\n")
     end
 
     def refuse!(target, gems, report)
@@ -195,14 +249,16 @@ module RubyWasmIcInstaller
               "`ruby_wasm_ic_installer setup` to update it"] if i[:protocol] < 2
 
       ["canister: protocol #{i[:protocol]}, #{i[:build] ? "build #{i[:build]}" : 'build not reported'}" \
-       "#{i[:release] ? ", release #{i[:release]}" : ''}"]
+       "#{i[:release] ? ", release #{i[:release]}" : ''}",
+       *(i[:protocol] < 3 ? ["canister half: protocol #{i[:protocol]}, which reports no linked extensions: re-run " \
+                             "`ruby_wasm_ic_installer setup` to update it"] : [])]
     end
 
     # The declared target against what the canister runs: a move to another
-    # Build or Release.
+    # Build or Release. Release 0.0.0 (a CI dry run's module) is no Release.
     def transition_lines(i, target)
-      from = [i[:build], i[:release]].compact.join(" ")
-      return [] if from.empty? || (i[:build] == target.build && (target.release.nil? || i[:release] == target.release))
+      from = [i[:build], (i[:release] if Rules.release?(i[:release]))].compact.join(" ")
+      return [] if from.empty? || runs_target?(i, target)
 
       ["transition: the canister runs #{from}; this is for #{target}"]
     end
