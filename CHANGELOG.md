@@ -6,6 +6,20 @@ version knows is listed under **Known Releases**, not encoded in the number.
 **Protocol** is the version of the canister half's interface. When it changes,
 re-run `setup` and upgrade once.
 
+## 0.4.1: 26 November 2026
+
+Known Releases: 0.13.0 to 0.15.0. Protocol 3, unchanged.
+
+- **Built-in gems:** a locked `prism` is refused on either Build with its own
+  message. Ruby 3.3.3 has Prism 0.19.0 built in, which `require "prism"`
+  loads, and the lock's version, a different gem with a C extension, can't
+  replace it. Before, it got the general "add it to ruby_wasm_builder"
+  refusal.
+- **Every command works under a US-ASCII locale,** not only `setup`. The lock
+  is read as UTF-8, and icp-cli's output is too, so a refusal naming a
+  non-ASCII path no longer crashes the Installer. `-EUTF-8:UTF-8` isn't
+  needed.
+
 ## 0.4.0: 26 November 2026
 
 Known Releases: 0.13.0 to 0.15.0. Protocol 3, unchanged.

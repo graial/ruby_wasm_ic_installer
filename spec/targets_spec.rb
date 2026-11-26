@@ -61,6 +61,16 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       expect(@canister.calls.map(&:first)).to eq(["installed"])
     end
 
+    it "refuses prism by name on either Build, saying Ruby has its own built in" do
+      %w[minimal full].each do |b|
+        c = config("build: #{b}\nrelease: 0.15.0\n")
+        expect { build(config: c).install(lockfile(%w[rack 3.1.8], %w[prism 2.1.0])) }
+          .to raise_error(described_class::Refused, /prism-2.1.0: Ruby 3.3.3 has Prism 0.19.0 built in, which `require "prism"` loads/)
+      end
+      expect(@canister.calls.map(&:first).uniq).to eq(["installed"])
+      expect(@factory.fetched).to eq([])
+    end
+
     it "still refuses other compiled gems, pointing at the builder" do
       @factory.build("nokogiri_like", "1.0.0", { "lib/n.rb" => "", "ext/e/extconf.rb" => "" },
                      extensions: ["ext/e/extconf.rb"])

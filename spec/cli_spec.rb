@@ -34,6 +34,25 @@ RSpec.describe RubyWasmIcInstaller::CLI do
     expect(@out.string).to include("nothing to prune")
   end
 
+  it "installs and reports under a US-ASCII locale, and reads a lock with non-ASCII in it" do
+    @factory.build("rack", "3.1.9", "lib/rack.rb" => "# Café\nmodule Rack; end\n")
+    File.write(@lock, File.read(@lock).sub("rack (3.1.8)", "rack (3.1.9)"))
+    path_lock = File.join(@dir, "path.lock")
+    File.write(path_lock, "PATH\n  remote: vendor/café\n  specs:\n    local (1.0.0)\n\nGEM\n  remote: https://rubygems.org/\n" \
+                          "  specs:\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n  local!\n")
+    external = Encoding.default_external
+    begin
+      Encoding.default_external = Encoding::US_ASCII
+      expect(cli("install", "my_app", "--lock", @lock)).to eq(0)
+      expect(cli("status", "my_app")).to eq(0)
+      expect(@out.string).to include("installed: rack-3.1.9")
+      expect(cli("install", "my_app", "--lock", path_lock)).to eq(2)
+      expect(@err.string).to include("local comes from path")
+    ensure
+      Encoding.default_external = external
+    end
+  end
+
   describe "the target and the config" do
     def write_config(text) = File.write(File.join(@dir, ".ruby_wasm_ic_installer.yml"), text)
 

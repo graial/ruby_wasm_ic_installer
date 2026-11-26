@@ -29,6 +29,11 @@ module RubyWasmIcInstaller
     # lock that pins a gem of one of these names gets a note, never a warning.
     PART_OF_RUBY = %w[continuation coverage monitor objspace rbconfig ripper].freeze
 
+    # Built-in gems: compiled into the Ruby both Builds carry (3.3.3), not
+    # linked as an extension, so `require` finds them with nothing sent. A
+    # locked version is another gem, which cannot replace the built-in one.
+    BUILT_IN = { "prism" => "0.19.0" }.freeze
+
     # The builder Releases these tables were checked against (ADR 0001). A
     # target before the oldest is refused; one after the newest is warned of.
     OLDEST_KNOWN = ::Gem::Version.new("0.13.0")
@@ -38,7 +43,8 @@ module RubyWasmIcInstaller
     # The Release a CI dry run's module reports: not a Release.
     NO_RELEASE = "0.0.0"
 
-    # A gem (and versions of it) that refuses to load on a target.
+    # A gem (and versions of it) that refuses to load on a target, on one
+    # Build, or on every Build when `build` is nil.
     Refusal = Struct.new(:gem, :build, :gem_versions, :message, keyword_init: true)
 
     REFUSALS = [
@@ -47,7 +53,12 @@ module RubyWasmIcInstaller
                            "Gemfile: `full` links the real extensions"),
       Refusal.new(gem: "ruby_wasm_ic_minimal", build: "minimal", gem_versions: "< 0.1.5",
                   message: "ruby_wasm_ic_minimal before 0.1.5 refuses to load on minimal 0.13.0 or later: " \
-                           "update it to 0.1.5 or later")
+                           "update it to 0.1.5 or later"),
+      *BUILT_IN.map do |gem, version|
+        Refusal.new(gem: gem, message: "Ruby 3.3.3 has #{gem.capitalize} #{version} built in, which " \
+                                       "`require \"#{gem}\"` loads; the locked version cannot replace it: remove " \
+                                       "#{gem} from the lock, or leave it out of what you install")
+      end
     ].freeze
 
     module_function
@@ -61,7 +72,7 @@ module RubyWasmIcInstaller
     end
 
     def hit?(rule, target, name, version)
-      return false unless rule.gem == name && rule.build == target.build
+      return false unless rule.gem == name && (rule.build.nil? || rule.build == target.build)
 
       !rule.gem_versions || ::Gem::Requirement.new(rule.gem_versions).satisfied_by?(::Gem::Version.new(version))
     end

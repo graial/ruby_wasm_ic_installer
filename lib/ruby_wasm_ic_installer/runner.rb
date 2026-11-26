@@ -40,7 +40,7 @@ module RubyWasmIcInstaller
         f.flush
         argv = [@icp, "canister", "call", @canister, method, "--args-file", f.path, "--args-format", "bin",
                 "-o", "hex", *(query ? ["--query"] : []), *@icp_args]
-        out, err, status = @spawn.call(*argv)
+        out, err, status = utf8(*@spawn.call(*argv))
         raise CallError.new(failure("icp canister call #{method}", out, err), refusal: refusal(err)) unless status.success?
 
         hex = out.strip
@@ -53,13 +53,16 @@ module RubyWasmIcInstaller
     # `icp deploy <canister> --mode upgrade`: builds and installs the project's
     # module as an upgrade, which boots the canister again.
     def deploy
-      out, err, status = @spawn.call(@icp, "deploy", @canister, "--mode", "upgrade", *@icp_args)
+      out, err, status = utf8(*@spawn.call(@icp, "deploy", @canister, "--mode", "upgrade", *@icp_args))
       raise CallError, failure("icp deploy #{@canister} --mode upgrade", out, err) unless status.success?
 
       out
     end
 
     private
+
+    # icp-cli writes UTF-8, which a US-ASCII locale would mis-tag.
+    def utf8(out, err, status) = [out.dup.force_encoding("UTF-8").scrub, err.dup.force_encoding("UTF-8").scrub, status]
 
     # icp-cli's own message under a header saying whose it is, so a project
     # error (a missing file icp reads, say) does not look like an Installer fault.

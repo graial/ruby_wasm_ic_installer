@@ -29,6 +29,15 @@ RSpec.describe RubyWasmIcInstaller::Runner do
     expect(seen.first).to eq("icp")
   end
 
+  it "reads icp-cli's output as UTF-8 under any locale, as a US-ASCII locale tags it" do
+    err = "Error: Canister called `ic0.trap` with message: 'refused: no gem at café-1.0.0'.\n".b.force_encoding("US-ASCII")
+    r = described_class.new(canister: "app", spawn: ->(*) { ["", err, bad] })
+    expect { r.call("install_commit", "x") }.to raise_error(described_class::CallError) { |e|
+      expect(e.refusal).to eq("no gem at café-1.0.0")
+      expect(e.message).to include("café-1.0.0")
+    }
+  end
+
   it "raises with the canister's refusal when the call traps with refused:" do
     err = "Error: Canister called `ic0.trap` with message: 'refused: only a controller may install code'.\n"
     r = described_class.new(canister: "app", spawn: ->(*) { ["", err, bad] })

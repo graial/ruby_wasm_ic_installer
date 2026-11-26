@@ -33,6 +33,10 @@ A Target that differs from the Build or Release the canister runs now, until the
 A C extension compiled into a Build's module, named by its require name (`json/ext/parser`, `date_core`). A gem whose name a linked extension maps to is a **linked gem**.
 _Avoid_: built-in, bundled extension
 
+**Built-in gem**:
+A gem whose code is compiled into the Ruby a Build carries, not linked in as an extension, such as Prism 0.19.0. `require` finds it, but a locked version of the gem with a C extension is still refused, because it is a different gem from the one that would load.
+_Avoid_: bundled gem, default gem (Ruby's own words for other things)
+
 **Drift**:
 A difference between the Installer's table of Linked extensions and the list a canister running the Target reports.
 
@@ -52,6 +56,10 @@ Stopping an install, before anything is sent, because of a gem the canister cann
 **Canister half**:
 The part of the Installer vendored into an Application, which runs on the canister and answers its calls.
 _Avoid_: server side, on-chain half
+
+**Boot outcome**:
+How the Application's boot ended, as the Application itself reports it: *booted*, *failed* (with the error), or *unreported* when the Application doesn't report it.
+_Avoid_: boot result, boot status, health
 
 **Protocol**:
 The version of the Canister half's interface, which `installed` reports. It can be older than the Installer, because the Canister half is vendored.

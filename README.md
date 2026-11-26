@@ -165,6 +165,9 @@ On the target, `install` and `status`:
 - refuse a gem version known to refuse the target (`ruby_wasm_ic_minimal`
   before 0.1.5 on `minimal`). `install` checks the lock;
   `status` checks what the pending and running setups would load.
+- refuse a locked **built-in gem**: Ruby 3.3.3 has Prism 0.19.0 built in, on
+  both Builds, and `require "prism"` loads it; the lock's `prism`, a
+  different gem with a C extension, can't replace it.
 - refuse any other compiled gem: add it to ruby_wasm_builder, not here.
 
 The tables behind this are in this gem (`Rules`); a new row is a release.

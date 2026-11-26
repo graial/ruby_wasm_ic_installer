@@ -19,7 +19,7 @@ module RubyWasmIcInstaller
     def self.read(path)
       raise Error, "no lockfile at #{path}: run `bundle lock` first" unless File.file?(path)
 
-      new(File.read(path), path: path)
+      new(File.read(path, encoding: "UTF-8"), path: path)
     end
 
     def initialize(text, path: "Gemfile.lock")
