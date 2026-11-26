@@ -6,13 +6,16 @@ require "rbconfig"
 # Layer 3 (W29, Q18): the Installer end to end, on a local icp-cli network
 # (whose launcher runs PocketIC). It repeats W28 through the gem: `setup` wires
 # a Roda Application in, the packer packs it on a published Base Module, icp-cli
-# deploys it, `install` sends Rack, Roda and the two ruby_wasm_ic gems from a
-# real Gemfile.lock (fetched from rubygems.org), an upgrade loads them, and the
-# canister serves a page through them. Then a second install sends nothing.
+# deploys it, `install` sends Rack, Roda and the ruby_wasm_ic gems the Build
+# needs from a real Gemfile.lock (fetched from rubygems.org), an upgrade loads
+# them, and the canister serves a page through them. Then a second install
+# sends nothing. The lock is fixtures/<build>/Gemfile.lock: `minimal` adds
+# ruby_wasm_ic_minimal, which `full` refuses.
 #
 # Skipped unless asked:
 #   E2E_BASE=path/to/ruby-3.3-wasm32-unknown-icp-minimal-0.15.0.wasm
 #   E2E_PACKER=path/to/packer-0.15.0         (the unpacked packer tarball)
+#   E2E_BUILD=minimal|full                   (default: from E2E_BASE's name)
 #   E2E_ICP=icp                              (icp-cli 1.6 or later; default icp)
 #   ICP_CLI_NETWORK_LAUNCHER_PATH=...        (if icp-cli cannot fetch its launcher)
 # and run with `bundle exec rspec spec/e2e`. It needs rubygems.org and a few
@@ -21,9 +24,11 @@ RSpec.describe "the Installer on a local icp-cli network", :e2e do
   base = ENV["E2E_BASE"]
   packer = ENV["E2E_PACKER"]
   icp = ENV.fetch("E2E_ICP", "icp")
+  build = ENV.fetch("E2E_BUILD") { base.to_s[/-(minimal|full)-/, 1] }
 
   before(:all) do
     skip "set E2E_BASE and E2E_PACKER to run the end-to-end spec" unless base && packer
+    raise "set E2E_BUILD to minimal or full: #{base}'s name does not say" unless %w[minimal full].include?(build)
   end
 
   around do |ex|
@@ -64,7 +69,8 @@ RSpec.describe "the Installer on a local icp-cli network", :e2e do
   it "installs Rack and Roda from a lock, takes effect at the upgrade, and serves a page through them" do
     app = File.join(@dir, "app")
     FileUtils.cp_r(File.expand_path("fixtures/app", __dir__), app)
-    FileUtils.cp(File.expand_path("fixtures/Gemfile.lock", __dir__), @dir)
+    FileUtils.cp(File.expand_path("fixtures/#{build}/Gemfile.lock", __dir__), @dir)
+    File.write(File.join(@dir, ".ruby_wasm_ic_installer.yml"), "build: #{build}\n")
     cli("setup", app)
     expect(cli("setup", app, "--check")).to include("setup is current")
 
@@ -78,10 +84,12 @@ RSpec.describe "the Installer on a local icp-cli network", :e2e do
 
     report = cli("install", "site", "--lock", File.join(@dir, "Gemfile.lock"), "--icp", icp,
                  "--project-root", @dir, "--cache", File.join(@dir, "cache"))
-    expect(report).to include("send rack-3.1.8", "send roda-3.109.0", "send ruby_wasm_ic_minimal-0.1.3",
-                              "send ruby_wasm_ic_rack-0.1.1",
-                              "rewrite rack-3.1.8/lib/rack/utils.rb:1: magic comment binary -> ascii-8bit",
-                              "setup generation 1 takes effect at the next upgrade")
+    sent = %w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_rack-0.1.1]
+    sent.insert(2, "ruby_wasm_ic_minimal-0.1.5") if build == "minimal"
+    lines = report.lines(chomp: true)
+    expect(lines.grep(/\Asend /).map { _1.split[1] }).to eq(sent)
+    expect(lines).to include(match(/\Atarget: #{build} 0\.1[3-9]\.\d+ \(/), "setup generation 1 takes effect at the next upgrade")
+    expect(lines.grep(/newer than|rewrite/)).to eq([])
     expect(get("/books")).to eq("w28 app not installed") # not until the upgrade
 
     sh(icp, "deploy", "--mode", "upgrade", "--yes")
@@ -89,7 +97,8 @@ RSpec.describe "the Installer on a local icp-cli network", :e2e do
     expect(get("/books/search?q=Jos%C3%A9")).to eq("q=José")
     status = cli("status", "site", "--icp", icp, "--project-root", @dir)
     expect(status).to include("running generation: 1", "pending generation: 1",
-                              "installed: rack-3.1.8, roda-3.109.0, ruby_wasm_ic_minimal-0.1.3, ruby_wasm_ic_rack-0.1.1")
+                              "installed: #{sent.join(', ')}", "known releases: 0.13.0 to 0.15.0 " \
+                              "(ruby_wasm_ic_installer #{RubyWasmIcInstaller::VERSION})")
 
     again = cli("install", "site", "--lock", File.join(@dir, "Gemfile.lock"), "--icp", icp,
                 "--project-root", @dir, "--cache", File.join(@dir, "cache"))

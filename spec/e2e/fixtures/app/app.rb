@@ -1,12 +1,18 @@
 # frozen_string_literal: true
 
 # The end-to-end Application: roda_on_minimal's Books app (0.7.0), with Rack,
-# Roda and both ruby_wasm_ic gems installed through calls by the Installer, not
+# Roda and the ruby_wasm_ic gems the Build needs installed through calls by the Installer, not
 # packed. Until they are installed and an upgrade has loaded them, the
 # gateway answers 503. setup writes the Installer's block above this comment.
 W28_APP =
   begin
-    require "ruby_wasm_ic_minimal" # first: the Encoding constants and the stand-ins
+    # First, on minimal: the Encoding constants and the stand-ins. `full`
+    # links the real extensions, and ruby_wasm_ic_minimal refuses to load there.
+    if defined?(IC::BUILD) && IC::BUILD == "full"
+      require "stringio"
+    else
+      require "ruby_wasm_ic_minimal"
+    end
     require "ruby_wasm_ic_rack"
     require "roda"
 

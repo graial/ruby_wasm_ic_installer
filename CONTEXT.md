@@ -15,8 +15,16 @@ The ruby_wasm_builder version a module was published as. `0.0.0` (a CI dry run's
 _Avoid_: builder version
 
 **Target**:
-The Build and Release an install is for: declared by the developer, or else what the canister reports, or else assumed `minimal`.
+The Build and Release an install is for. When the module about to be installed has a Module record, the Target is what that record says, and every declared Build or Release must agree with it. Otherwise the Target is what the developer declared, or else what the canister reports, or else assumed `minimal`.
 _Avoid_: environment, platform
+
+**Module record**:
+What a Base Module from Release 0.15.0 on records about itself, readable without booting it: its Build and Release, its Ruby, its Linked extensions with their gems and versions, and its encodings.
+_Avoid_: manifest, build info, pack metadata
+
+**Known Releases**:
+The range of Releases, from oldest to newest, whose facts the Installer's tables were checked against. It is declared as data, and the Installer's own version number doesn't encode it. A Target below the oldest is refused. A Target above the newest gets a warning, which strict mode turns into a refusal.
+_Avoid_: supported versions, compatible builders
 
 **Transition**:
 A Target that differs from the Build or Release the canister runs now, until the canister is upgraded.

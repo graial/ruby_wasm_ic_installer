@@ -299,7 +299,10 @@ target refuses.
 ```bash
 bundle install
 bundle exec rake          # every spec on MRI, no network; fails below 95% line coverage
-bundle exec rake e2e      # the end-to-end spec on a local icp-cli network
+
+# to run e2e a local ic network must be running
+E2E_BASE=<path-to-wasm-release>/ruby-3.3-wasm32-unknown-icp-<full-or-minimal>-<version>.wasm E2E_PACKER=$PWD/<path-to-packer>packer-<version> bundle exec rake e2e      # the end-to-end spec on a local icp-cli network
+
 ```
 
 The specs run the real canister half on MRI over a temporary `/data`, behind
