@@ -41,8 +41,8 @@ RSpec.describe RubyWasmIcInstaller::CLI do
       write_config("build: full\nrelease: 0.13.0\n")
       expect(cli("status", "my_app", "--project-root", @dir)).to eq(0)
       expect(@out.string).to include("target: full 0.13.0 (build from #{@dir}/.ruby_wasm_ic_installer.yml")
-      expect(cli("status", "my_app", "--project-root", @dir, "--build", "minimal", "--release", "0.12.0")).to eq(0)
-      expect(@out.string).to include("target: minimal 0.12.0 (build from --build, release from --release)")
+      expect(cli("status", "my_app", "--project-root", @dir, "--build", "minimal", "--release", "0.14.0")).to eq(0)
+      expect(@out.string).to include("target: minimal 0.14.0 (build from --build, release from --release)")
     end
 
     it "reads --config" do

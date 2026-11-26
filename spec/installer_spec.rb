@@ -20,7 +20,7 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       @factory.build("rack", "3.1.8", "lib/rack.rb" => "module Rack; VERSION = '3.1.8'; end\n",
                                       "lib/rack/utils.rb" => "# -*- encoding: binary -*-\nmodule Rack::Utils; end\n")
       @factory.build("roda", "3.109.0", "lib/roda.rb" => "class Roda; end\n")
-      @factory.build("ruby_wasm_ic_minimal", "0.1.3",
+      @factory.build("ruby_wasm_ic_minimal", "0.1.5",
                      "lib/ruby_wasm_ic_minimal.rb" => "module RubyWasmIcMinimal; end\n",
                      **%w[date encoding_constants stringio strscan].to_h { ["lib/ruby_wasm_ic_minimal/standins/#{_1}.rb", ""] })
       ex.run
@@ -28,34 +28,33 @@ RSpec.describe RubyWasmIcInstaller::Installer do
   end
 
   let(:lock) do
-    lockfile(%w[rack 3.1.8], %w[roda 3.109.0], %w[ruby_wasm_ic_minimal 0.1.3], %w[stringio 3.1.2], %w[strscan 3.1.0])
+    lockfile(%w[rack 3.1.8], %w[roda 3.109.0], %w[ruby_wasm_ic_minimal 0.1.5], %w[stringio 3.1.2], %w[strscan 3.1.0])
   end
 
-  it "installs a lock: skips the stand-ins' gems, rewrites aliases, sends, commits, writes the setup file" do
+  it "installs a lock: skips the stand-ins' gems, sends, commits, writes the setup file" do
     report = @installer.install(lock)
     expect(report).to include(
       "skip stringio-3.1.2: ruby_wasm_ic_minimal stands in for stringio on a minimal canister",
       "skip strscan-3.1.0: ruby_wasm_ic_minimal stands in for strscan on a minimal canister",
-      "rewrite rack-3.1.8/lib/rack/utils.rb:1: magic comment binary -> ascii-8bit",
       "setup generation 1 takes effect at the next upgrade",
       "upgrade the canister to load it (icp deploy --mode upgrade)"
     )
-    expect(report.grep(/^send /).map { _1.split.at(1) }).to eq(%w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_minimal-0.1.3])
+    expect(report.grep(/^send /).map { _1.split.at(1) }).to eq(%w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_minimal-0.1.5])
     expect(@factory.fetched).not_to include("stringio-3.1.2")
-    expect(installed).to include(gems: %w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_minimal-0.1.3], pending: 1, running: nil)
+    expect(installed).to include(gems: %w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_minimal-0.1.5], pending: 1, running: nil)
     utils = File.join(@canister.dir, "gems/rack-3.1.8/lib/rack/utils.rb")
-    expect(File.read(utils)).to start_with("# -*- encoding: ascii-8bit -*-")
+    expect(File.read(utils)).to start_with("# -*- encoding: binary -*-")
   end
 
   it "takes effect at the next upgrade: the boot loads the gems from /data" do
     @installer.install(lock)
     expect { require "roda" }.to raise_error(LoadError)
     @canister.upgrade!
-    expect($LOAD_PATH[1, 3]).to eq(%w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_minimal-0.1.3]
+    expect($LOAD_PATH[1, 3]).to eq(%w[rack-3.1.8 roda-3.109.0 ruby_wasm_ic_minimal-0.1.5]
                                      .map { File.join(@canister.dir, "gems", _1, "lib") })
     expect($LOAD_PATH.resolve_feature_path("roda")&.last).to eq(File.join(@canister.dir, "gems/roda-3.109.0/lib/roda.rb"))
     expect(@installer.status.first(3)).to eq(["running generation: 1", "pending generation: 1",
-                                              "installed: rack-3.1.8, roda-3.109.0, ruby_wasm_ic_minimal-0.1.3"])
+                                              "installed: rack-3.1.8, roda-3.109.0, ruby_wasm_ic_minimal-0.1.5"])
   end
 
   it "sends nothing the second time" do

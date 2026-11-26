@@ -48,7 +48,8 @@ module RubyWasmIcInstaller
         "pending generation: #{i[:pending] || 'none'}#{pending_note(i)}",
         "installed: #{i[:gems].empty? ? 'none' : i[:gems].join(', ')}",
         *(i[:partial].empty? ? [] : ["half-sent (.partial): #{i[:partial].join(', ')}"]),
-        *canister_lines(i), target.describe, *transition_lines(i, target), *linked(target, i).last,
+        *canister_lines(i), target.describe, known_line, *target.warnings.map { "warning: #{_1}" },
+        *transition_lines(i, target), *linked(target, i).last,
         *refusal_lines(target, i), *failure_lines(i)
       ]
     end
@@ -67,12 +68,10 @@ module RubyWasmIcInstaller
       skipped, wanted = locked.partition { skip.key?(_1.name) }
       skipped.each { report << "skip #{_1.name_version}: #{skip[_1.name]}" }
       warnings, notes = linked_versions(target, skipped, Rules.linked_gems(names))
+      warnings = target.warnings + warnings
       report.concat(warnings.map { "warning: #{_1}" }, notes.map { "note: #{_1}" })
       strict!(target, warnings, report)
-      prepared = wanted.map { @gem_files.prepare(_1, release: target.release_version) }
-      prepared.flat_map(&:rewrites).each do |r|
-        report << "rewrite #{r.file}:#{r.line}: magic comment #{r.from} -> #{r.to}"
-      end
+      prepared = wanted.map { @gem_files.prepare(_1) }
 
       plan = Plan.new(prepared, i, budget: @budget)
       plan.sent.each { report << "send #{_1.name_version} (#{_1.files.size} files, #{_1.bytes} bytes)" }
@@ -218,7 +217,7 @@ module RubyWasmIcInstaller
       skipped.select { linked_gems.include?(_1.name) }.each do |g|
         have = Rules.linked_version(target.build, g.name)
         if Rules.part_of_ruby?(g.name)
-          notes << "#{g.name_version} is locked; #{target.build} carries #{g.name} as part of Ruby 3.3.6, not as a gem"
+          notes << "#{g.name_version} is locked; #{target.build} carries #{g.name} as part of Ruby 3.3.3, not as a gem"
         elsif have.nil?
           notes << "#{g.name_version} is locked; #{target.build} links #{g.name}, a version this Installer does not mirror"
         elsif have != g.version
@@ -271,6 +270,8 @@ module RubyWasmIcInstaller
       pairs = (i[:load_paths] + i[:running_paths]).map { _1.split("/").first }.uniq.map { _1.rpartition("-").then { |a, _, v| [a, v] } }
       Rules.refused(target, pairs).map { "refuses #{target}: #{_1}" }
     end
+
+    def known_line = "known releases: #{Rules::OLDEST_KNOWN} to #{Rules::NEWEST_KNOWN} (ruby_wasm_ic_installer #{VERSION})"
 
     def failure_lines(i) = i[:load_failures].map { "load failure: #{_1}" }
 

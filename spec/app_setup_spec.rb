@@ -57,6 +57,20 @@ RSpec.describe RubyWasmIcInstaller::AppSetup do
       expect(read("app.rb")).to eq("#{s::APP}x = 1")
     end
 
+    it "reads the Application's files as UTF-8, whatever the locale" do
+      File.write(File.join(@app, "app.rb"), "# frozen_string_literal: true\n# hello…\ndef hello = \"hi\"\n")
+      File.write(File.join(@app, "ic-interface.rb"), "# the interface…\nupdate :hello, takes: [], returns: Text\n")
+      external = Encoding.default_external
+      begin
+        Encoding.default_external = Encoding::US_ASCII
+        expect(setup.run.size).to eq(3)
+      ensure
+        Encoding.default_external = external
+      end
+      expect(read("app.rb")).to eq("# frozen_string_literal: true\n#{s::APP}# hello…\ndef hello = \"hi\"\n")
+      expect(read("ic-interface.rb")).to start_with("# the interface…\n")
+    end
+
     it "adds a newline before the block when ic-interface.rb has none at its end" do
       File.write(File.join(@app, "ic-interface.rb"), "update :hello, takes: [], returns: Text")
       setup.run

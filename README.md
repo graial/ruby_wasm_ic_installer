@@ -34,19 +34,10 @@ own parser (it resolves nothing: the lock is yours) and, for each locked gem:
   to it (`json`, `psych`, `date`, `bigdecimal`, `openssl`, `zlib`, `stringio`
   and the rest: see [Linked gems](#linked-gems-on-full));
 - opens only its `require_paths` (normally `lib/`);
-- checks each file's **magic comment** against the target's Release. From
-  ruby_wasm_builder 0.13.0 both Builds link every Ruby 3.3 encoding, so any
-  encoding Ruby knows is sent as written; only one Ruby cannot read source in
-  (UTF-16, UTF-32) is refused. Before 0.13.0, **or when the Release is not
-  known**, a canister claims three encodings, UTF-8, US-ASCII and ASCII-8BIT,
-  each by one name and no alias, and reads the comment before any Ruby runs:
-  an alias of one is **rewritten** (`# encoding: binary` to `ascii-8bit`,
-  `ascii` to `us-ascii`), and any other encoding is **refused** (`ISO-8859-1`,
-  `Shift_JIS`, `EUC-JP`), with a hint to declare `release:`. Such a canister
-  also lists nine names (the UTF-16 and UTF-32 family, UTF8-MAC, EUC-JP,
-  Windows-31J) with no encoding behind them: a file whose comment names one
-  would load as ASCII-8BIT, so it is refused too. Every rewrite is in the
-  report.
+- checks each file's **magic comment**. Every Release this Installer knows
+  links every Ruby 3.3 encoding on both Builds, so any encoding Ruby knows is
+  sent as written; a name Ruby does not know, or an encoding Ruby cannot read
+  source in (UTF-16, UTF-32), is **refused**.
 
 It asks the canister what it has (`installed`), and sends **only the gem
 versions it lacks**, packed into calls of up to 2,000,000 bytes (the IC's
@@ -145,7 +136,7 @@ What a gem needs depends on the module the canister runs: its **Build**
 
 ```yaml
 build: full          # minimal | full
-release: 0.13.0
+release: 0.15.0
 verify: [roda, ruby_wasm_ic_rack]    # require names `verify` checks on the canister
 strict: true         # refuse, not warn (see below); or --strict
 ```
@@ -158,8 +149,13 @@ runs a CI dry run's module, which is no Release: it sets no Release and shows
 no transition. The file is the desired state and the canister the observed
 one; the Installer keeps no state of its own, so a move from one Build or
 Release to another shows as a **transition** line until the canister has been
-upgraded. `full` exists from 0.13.0: `build: full` with an earlier `release:`
-is an error.
+upgraded.
+
+**Known Releases.** This Installer knows ruby_wasm_builder 0.13.0 to 0.15.0,
+which `status` shows. A target Release before 0.13.0 is an error. One newer
+than 0.15.0 installs with a `warning:` that this gem's tables may be out of
+date, which `--strict` turns into a refusal. The Installer's own version
+number says nothing about which Releases it knows.
 
 On the target, `install` and `status`:
 
@@ -167,7 +163,7 @@ On the target, `install` and `status`:
   `ruby_wasm_ic_minimal` by name ("remove it from the Gemfile: `full` links
   the real extensions") before anything is sent;
 - refuse a gem version known to refuse the target (`ruby_wasm_ic_minimal`
-  before 0.1.5 on `minimal` 0.13.0 or later). `install` checks the lock;
+  before 0.1.5 on `minimal`). `install` checks the lock;
   `status` checks what the pending and running setups would load.
 - refuse any other compiled gem: add it to ruby_wasm_builder, not here.
 
@@ -182,7 +178,7 @@ The tables behind this are in this gem (`Rules`); a new row is a release.
 `rbconfig/sizeof`, `ripper`, `stringio`, `strscan`, `zlib`. Each maps to a
 gem by its first segment (`json/ext/parser` to `json`), and `date_core` to
 `date`; a locked gem of one of those names is skipped. Its Ruby half (`json.rb`,
-`psych.rb` …) is Ruby 3.3.6's, shipped in the module.
+`psych.rb` …) is Ruby 3.3.3's, shipped in the module.
 
 Where the list comes from: the canister reports it (`IC::LINKED_EXTENSIONS`,
 from builder 0.14.0) when it already runs the target's Build and Release, and
@@ -191,15 +187,15 @@ gem's table. Otherwise, and that is the usual case when you send gems first,
 the canister runs the old module, so the Installer uses its table.
 
 **What loads is the module's version, not the lock's.** Skipping a locked
-`json 2.9.1` gives the Application the `json` Ruby 3.3.6 ships, 2.7.1, and
+`json 2.9.1` gives the Application the `json` Ruby 3.3.3 ships, 2.7.1, and
 `install` says so:
 
 ```
 warning: json-2.9.1 is locked; full links json 2.7.1, which is what will load
-note: monitor-0.3.0 is locked; full carries monitor as part of Ruby 3.3.6, not as a gem
+note: monitor-0.3.0 is locked; full carries monitor as part of Ruby 3.3.3, not as a gem
 ```
 
-The versions mirrored are ruby_wasm_builder's, from Ruby 3.3.6's default
+The versions mirrored are ruby_wasm_builder's, from Ruby 3.3.3's default
 gemspecs: `bigdecimal` 3.1.5, `cgi` 0.4.1, `date` 3.3.4, `digest` 3.1.1,
 `etc` 1.4.3, `fcntl` 1.1.0, `json` 2.7.1, `nkf` 0.1.3, `openssl` 3.2.0,
 `pathname` 0.3.0, `psych` 5.1.2, `stringio` 3.1.1, `strscan` 3.0.9, `zlib`
@@ -284,11 +280,10 @@ target refuses.
 - **Gems from a gem server only;** a `git` or `path` source in the lock is
   refused.
 - **A single file larger than one call** (about 2 MB) cannot be sent.
-- **Three encodings before Release 0.13.0,** or when the Release is unknown:
-  UTF-8, US-ASCII and ASCII-8BIT, the ones a `minimal` canister claims
-  (ruby_wasm_builder's ADR-0053; the other nine names it lists were probed on
-  0.8.0 and are names only, W30). From 0.13.0, every Ruby 3.3 encoding. The
-  check runs on your machine's Ruby, which knows the same encodings.
+- **ruby_wasm_builder 0.13.0 or later.** For an older Base Module, use
+  ruby_wasm_ic_installer 0.3.x.
+- **The encoding check runs on your machine's Ruby,** which knows the same
+  encodings as the canister's Ruby 3.3.
 - **Two halves, one version.** The canister half is vendored into the
   Application, so it can be older than this gem. `installed` reports a
   `protocol` number (3 from 0.3.0). Against protocol 2 the Installer still
@@ -313,7 +308,7 @@ by the specs and a stand-in for ruby_wasm_builder's `IC`. The Candid encoder
 is held byte for byte to what `@dfinity/didc` encodes for the same values
 (`spec/fixtures/didc-vectors.json`).
 
-`rake e2e` needs `E2E_BASE` (a published Base Module, 0.8.0 or later) and
+`rake e2e` needs `E2E_BASE` (a published Base Module, 0.13.0 or later) and
 `E2E_PACKER` (that Release's unpacked packer), icp-cli as `icp` or `E2E_ICP`,
 and rubygems.org. It runs `setup` on a Roda Application, packs and deploys it,
 installs Rack, Roda and the two `ruby_wasm_ic` gems from a real lock, upgrades,
@@ -325,5 +320,10 @@ If icp-cli cannot fetch its network launcher, download it by tag from
 ## Versions
 
 - **0.1.0:** the first release.
+- **0.4.0:** Known Releases (ruby_wasm_builder 0.13.0 to 0.15.0); Releases
+  before 0.13.0 are refused, so the three-encoding rule and its rewrites are
+  gone, and `ruby_wasm_ic_minimal` before 0.1.5 is refused on `minimal`
+  whatever the Release. Ruby is 3.3.3, not 3.3.6, in messages. `setup` reads
+  the Application's files as UTF-8 under any locale.
 
 MIT licensed.

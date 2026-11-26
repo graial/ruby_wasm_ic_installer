@@ -30,13 +30,6 @@ RSpec.describe RubyWasmIcInstaller::Rules do
     expect(unmapped.all? { r.part_of_ruby?(_1) }).to be(true)
   end
 
-  it "accepts every encoding from Release 0.13.0, and not before or when the Release is unknown" do
-    expect(r.every_encoding?(Gem::Version.new("0.13.0"))).to be(true)
-    expect(r.every_encoding?(Gem::Version.new("0.14.0"))).to be(true)
-    expect(r.every_encoding?(Gem::Version.new("0.12.0"))).to be(false)
-    expect(r.every_encoding?(nil)).to be(false)
-  end
-
   it "treats 0.0.0, a CI dry run's module, as no Release" do
     expect(r.release?("0.0.0")).to be(false)
     expect(r.release?(nil)).to be(false)

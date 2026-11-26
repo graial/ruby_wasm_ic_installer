@@ -116,22 +116,22 @@ module RubyWasmIcInstaller
 
     def interface_change
       path = file("ic-interface.rb")
-      old = File.read(path)
+      old = File.read(path, encoding: "UTF-8")
       conflicts!(path, old, /^\s*(?:update|query)\s+:(#{NAMES.join('|')})\b|^\s*type\s+:(#{TYPES.join('|')})\b/)
       replace_or_add(path, old, INTERFACE, at_top: false)
     end
 
     def app_change
       path = file("app.rb")
-      old = File.read(path)
+      old = File.read(path, encoding: "UTF-8")
       conflicts!(path, old, /^\s*def\s+(?:self\.)?(#{NAMES.join('|')})\b/)
       replace_or_add(path, old, APP, at_top: true)
     end
 
     def vendor_change
       path = File.join(@root, VENDOR, "ruby_wasm_ic_installer", "canister.rb")
-      new = File.read(CANISTER_SOURCE)
-      old = File.file?(path) ? File.read(path) : nil
+      new = File.read(CANISTER_SOURCE, encoding: "UTF-8")
+      old = File.file?(path) ? File.read(path, encoding: "UTF-8") : nil
       return nil if old == new
 
       Change.new(path: path, old: old, new: new, edited: !old.nil?)

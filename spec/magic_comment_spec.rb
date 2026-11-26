@@ -1,91 +1,33 @@
 # frozen_string_literal: true
 
-# Magic comments against the three encodings a canister claims (W29, Q9; W30).
+# Magic comments, on Releases that link every Ruby 3.3 encoding (0.13.0 on).
 RSpec.describe RubyWasmIcInstaller::MagicComment do
   m = described_class
 
-  it "rewrites an alias of one of the three to its canonical name, and says so" do
-    body, r = m.fix("rack-3.1.8/lib/rack/utils.rb", "# -*- encoding: binary -*-\n# frozen_string_literal: true\nx\n")
-    expect(body).to eq("# -*- encoding: ascii-8bit -*-\n# frozen_string_literal: true\nx\n")
-    expect(r.to_h).to eq(file: "rack-3.1.8/lib/rack/utils.rb", line: 1, from: "binary", to: "ascii-8bit")
-  end
-
-  {
-    "# encoding: ascii" => "us-ascii", "# coding: CP65001" => "utf-8", "# vim: set fileencoding=BINARY :" => "ascii-8bit",
-    "# encoding: ANSI_X3.4-1968" => "us-ascii"
-  }.each do |line, to|
-    it "rewrites #{line.inspect} to #{to}" do
-      body, r = m.fix("f.rb", "#{line}\n")
-      expect(r.to).to eq(to)
-      expect(body).to eq("#{line.sub(r.from, to)}\n")
+  it "accepts any encoding Ruby knows, as written" do
+    ["# encoding: euc-jp\n", "# coding: Shift_JIS\n", "# encoding: iso-8859-1\n", "# -*- encoding: binary -*-\n",
+     "# encoding: ascii\n", "# coding: SJIS\n", "x = 1\n", ""].each do |src|
+      expect(m.check!("f.rb", src)).to be_nil
     end
   end
 
-  it "leaves a canonical name alone, whatever its case" do
-    ["# encoding: utf-8\n", "# encoding: UTF-8\n", "# coding: ASCII-8BIT\n", "# encoding: us-ascii\n"].each do |src|
-      expect(m.fix("f.rb", src)).to eq([src, nil])
-    end
+  it "refuses a name Ruby does not know, naming the file" do
+    expect { m.check!("old-1.0/lib/old.rb", "# encoding: klingon\n") }
+      .to raise_error(m::Refused, %r{old-1.0/lib/old.rb names the encoding "klingon", which Ruby does not know})
+  end
+
+  it "refuses an encoding Ruby cannot read source in" do
+    expect { m.check!("f.rb", "# encoding: utf-16le\n") }.to raise_error(m::Refused, /UTF-16LE.*not ASCII-compatible/)
   end
 
   it "reads the second line after a shebang, and no further" do
-    body, r = m.fix("f.rb", "#!/usr/bin/env ruby\n# encoding: binary\n")
-    expect([body, r.line]).to eq(["#!/usr/bin/env ruby\n# encoding: ascii-8bit\n", 2])
-    expect(m.fix("f.rb", "x = 1\n# encoding: binary\n")).to eq(["x = 1\n# encoding: binary\n", nil])
-    expect(m.fix("f.rb", "")).to eq(["", nil])
+    expect { m.check!("f.rb", "#!/usr/bin/env ruby\n# encoding: klingon\n") }.to raise_error(m::Refused)
+    expect(m.check!("f.rb", "x = 1\n# encoding: klingon\n")).to be_nil
   end
 
-  it "refuses an encoding a canister lacks, naming the file and the encoding" do
-    expect { m.fix("old-1.0/lib/old.rb", "# encoding: iso-8859-1\n") }
-      .to raise_error(m::Refused, /old-1.0\/lib\/old.rb is written in ISO-8859-1 .*does not have/)
-    expect { m.fix("f.rb", "# coding: Shift_JIS\n") }.to raise_error(m::Refused, /Shift_JIS/)
-  end
-
-  it "refuses the nine names a canister lists but has no encoding behind, aliases too (W30)" do
-    %w[utf-16le UTF-16BE utf-32le UTF-32BE UTF-16 UTF-32 utf8-mac euc-jp Windows-31J].each do |name|
-      expect { m.fix("f.rb", "# encoding: #{name}\n") }
-        .to raise_error(m::Refused, /lists that name but has no .* behind it, so the file would load as ASCII-8BIT/)
-    end
-    expect { m.fix("f.rb", "# coding: SJIS\n") }.to raise_error(m::Refused, /Windows-31J .*"SJIS".*load as ASCII-8BIT/)
-    expect { m.fix("f.rb", "# coding: eucJP\n") }.to raise_error(m::Refused, /EUC-JP .*"eucJP".*load as ASCII-8BIT/)
-  end
-
-  it "refuses a name Ruby does not know" do
-    expect { m.fix("f.rb", "# encoding: klingon\n") }.to raise_error(m::Refused, /"klingon", which Ruby does not know/)
-  end
-
-  it "hints at declaring the Release when it does not know it, and not when the Release is before 0.13.0" do
-    expect { m.fix("f.rb", "# coding: euc-jp\n") }.to raise_error(m::Refused, /declare `release:`/)
-    expect { m.fix("f.rb", "# coding: euc-jp\n", release: Gem::Version.new("0.12.0")) }
-      .to raise_error(m::Refused) { expect(_1.message).not_to include("declare") }
-  end
-
-  describe "from Release 0.13.0, which links every Ruby 3.3 encoding" do
-    v = Gem::Version.new("0.13.0")
-
-    it "accepts any encoding Ruby knows, and rewrites nothing" do
-      ["# encoding: euc-jp\n", "# coding: Shift_JIS\n", "# encoding: iso-8859-1\n", "# -*- encoding: binary -*-\n",
-       "# encoding: ascii\n", "# coding: SJIS\n"].each do |src|
-        expect(m.fix("f.rb", src, release: v)).to eq([src, nil])
-      end
-    end
-
-    it "still refuses a name Ruby does not know, and an encoding Ruby cannot read source in" do
-      expect { m.fix("f.rb", "# encoding: klingon\n", release: v) }.to raise_error(m::Refused, /does not know/)
-      expect { m.fix("f.rb", "# encoding: utf-16le\n", release: v) }
-        .to raise_error(m::Refused, /UTF-16LE.*not ASCII-compatible/)
-    end
-
-    # The check runs on the host's Ruby (4.0 today), not the canister's 3.3:
-    # this fails loudly if a host Ruby drops an encoding 3.3 has.
-    it "finds the Japanese encodings on the host Ruby" do
-      %w[EUC-JP Shift_JIS Windows-31J ISO-2022-JP CP51932 eucJP-ms].each { expect(Encoding.find(_1)).to be_a(Encoding) }
-    end
-  end
-
-  it "holds the three ADR-0053 claims, and the nine W26 observed beside them" do
-    expect(m::CLAIMED_ENCODINGS).to eq(%w[ASCII-8BIT UTF-8 US-ASCII])
-    expect(m::UNCLAIMED_ENCODINGS.size).to eq(9)
-    all = m::CLAIMED_ENCODINGS + m::UNCLAIMED_ENCODINGS
-    expect(all.map { Encoding.find(_1).name }).to eq(all)
+  # The check runs on the host's Ruby (4.0 today), not the canister's 3.3:
+  # this fails loudly if a host Ruby drops an encoding 3.3 has.
+  it "finds the Japanese encodings on the host Ruby" do
+    %w[EUC-JP Shift_JIS Windows-31J ISO-2022-JP CP51932 eucJP-ms].each { expect(Encoding.find(_1)).to be_a(Encoding) }
   end
 end

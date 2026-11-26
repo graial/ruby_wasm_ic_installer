@@ -16,7 +16,7 @@ module RubyWasmIcInstaller
     # A linked require name's gem, where it is not the name's first segment.
     GEM_OF = { "date_core" => "date" }.freeze
 
-    # The version of each linked gem a Build carries: Ruby 3.3.6's, read by
+    # The version of each linked gem a Build carries: Ruby 3.3.3's, read by
     # the builder from its Release Bundle's default gemspecs.
     LINKED_VERSIONS = {
       "full" => { "bigdecimal" => "3.1.5", "cgi" => "0.4.1", "date" => "3.3.4", "digest" => "3.1.1",
@@ -25,28 +25,27 @@ module RubyWasmIcInstaller
                   "zlib" => "3.1.1" }.freeze
     }.freeze
 
-    # Linked names that Ruby 3.3.6 ships as part of Ruby, with no gemspec: a
+    # Linked names that Ruby 3.3.3 ships as part of Ruby, with no gemspec: a
     # lock that pins a gem of one of these names gets a note, never a warning.
     PART_OF_RUBY = %w[continuation coverage monitor objspace rbconfig ripper].freeze
 
-    # The first Release with a `full` Build.
-    FULL_FROM = ::Gem::Version.new("0.13.0")
-
-    # From this Release both Builds link every Ruby 3.3 encoding; before it a
-    # canister has three (MagicComment).
-    EVERY_ENCODING_FROM = ::Gem::Version.new("0.13.0")
+    # The builder Releases these tables were checked against (ADR 0001). A
+    # target before the oldest is refused; one after the newest is warned of.
+    OLDEST_KNOWN = ::Gem::Version.new("0.13.0")
+    NEWEST_KNOWN = ::Gem::Version.new("0.15.0")
+    KNOWN_RELEASES = ::Gem::Requirement.new(">= #{OLDEST_KNOWN}", "<= #{NEWEST_KNOWN}")
 
     # The Release a CI dry run's module reports: not a Release.
     NO_RELEASE = "0.0.0"
 
     # A gem (and versions of it) that refuses to load on a target.
-    Refusal = Struct.new(:gem, :build, :gem_versions, :releases, :message, keyword_init: true)
+    Refusal = Struct.new(:gem, :build, :gem_versions, :message, keyword_init: true)
 
     REFUSALS = [
       Refusal.new(gem: "ruby_wasm_ic_minimal", build: "full",
                   message: "ruby_wasm_ic_minimal is for `minimal` and refuses to load on `full`: remove it from the " \
                            "Gemfile: `full` links the real extensions"),
-      Refusal.new(gem: "ruby_wasm_ic_minimal", build: "minimal", gem_versions: "< 0.1.5", releases: ">= 0.13.0",
+      Refusal.new(gem: "ruby_wasm_ic_minimal", build: "minimal", gem_versions: "< 0.1.5",
                   message: "ruby_wasm_ic_minimal before 0.1.5 refuses to load on minimal 0.13.0 or later: " \
                            "update it to 0.1.5 or later")
     ].freeze
@@ -63,11 +62,8 @@ module RubyWasmIcInstaller
 
     def hit?(rule, target, name, version)
       return false unless rule.gem == name && rule.build == target.build
-      return false if rule.gem_versions && !::Gem::Requirement.new(rule.gem_versions).satisfied_by?(::Gem::Version.new(version))
-      return true unless rule.releases
 
-      rel = target.release_version
-      !rel.nil? && ::Gem::Requirement.new(rule.releases).satisfied_by?(rel)
+      !rule.gem_versions || ::Gem::Requirement.new(rule.gem_versions).satisfied_by?(::Gem::Version.new(version))
     end
 
     def linked(target) = LINKED.fetch(target.build, [])
@@ -79,7 +75,5 @@ module RubyWasmIcInstaller
     def part_of_ruby?(gem) = PART_OF_RUBY.include?(gem)
 
     def release?(release) = !release.nil? && release != NO_RELEASE
-
-    def every_encoding?(release_version) = !release_version.nil? && release_version >= EVERY_ENCODING_FROM
   end
 end

@@ -83,7 +83,7 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       report = build(config: full).install(lockfile(%w[json 2.9.1], %w[monitor 0.3.0]))
       expect(report).to include("warning: json-2.9.1 is locked; full links json 2.7.1, which is what will load",
                                 "skip monitor-0.3.0: linked into the full module, so it is not sent",
-                                "note: monitor-0.3.0 is locked; full carries monitor as part of Ruby 3.3.6, not as a gem")
+                                "note: monitor-0.3.0 is locked; full carries monitor as part of Ruby 3.3.3, not as a gem")
       expect(build(config: full).install(lockfile(%w[json 2.7.1], %w[zlib 3.1.1])).grep(/warning|note/)).to eq([])
     end
 
@@ -130,9 +130,43 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       expect(build.status).to include("target: full (build from the canister)")
     end
 
-    it "refuses full before Release 0.13.0, which had no full" do
-      expect { build(config: config("build: full\nrelease: 0.12.0\n")).install(lockfile(%w[rack 3.1.8])) }
-        .to raise_error(RubyWasmIcInstaller::Error, /`full` exists from ruby_wasm_builder 0.13.0/)
+  end
+
+  describe "Known Releases" do
+    it "refuses a target Release before 0.13.0, on either Build, naming where it came from" do
+      %w[minimal full].each do |b|
+        c = config("build: #{b}\nrelease: 0.12.0\n")
+        expect { build(config: c).install(lockfile(%w[rack 3.1.8])) }
+          .to raise_error(RubyWasmIcInstaller::Error, /#{c.path}: release 0.12.0 is older than this Installer knows \(0.13.0 or later\)/)
+      end
+      expect(@canister.calls.map(&:first).uniq).to eq(["installed"])
+    end
+
+    it "warns of a target Release newer than it knows, and installs" do
+      report = build(config: config("build: minimal\nrelease: 0.16.0\n")).install(lockfile(%w[rack 3.1.8]))
+      expect(report).to include("warning: release 0.16.0 is newer than this Installer knows (0.15.0 at most): " \
+                                "its tables may be out of date",
+                                match(/\Asend rack-3.1.8/))
+    end
+
+    it "refuses that Release under --strict, before anything is sent" do
+      c = config("build: minimal\nrelease: 0.16.0\n")
+      expect { build(config: c, flags: { strict: true }).install(lockfile(%w[rack 3.1.8])) }
+        .to raise_error(described_class::Refused, /refused \(strict\).*\n  release 0.16.0 is newer than this Installer knows/m)
+      expect(@canister.calls.map(&:first).uniq).to eq(["installed"])
+    end
+
+    it "are shown by status, with the warning when the target is newer" do
+      expect(build.status).to include("known releases: 0.13.0 to 0.15.0 (ruby_wasm_ic_installer #{RubyWasmIcInstaller::VERSION})")
+      expect(build(config: config("build: minimal\nrelease: 0.16.0\n")).status)
+        .to include(match(/\Awarning: release 0.16.0 is newer than this Installer knows/))
+    end
+
+    it "warns of nothing for a Release it knows" do
+      %w[0.13.0 0.14.0 0.15.0].each do |r|
+        expect(build(config: config("build: minimal\nrelease: #{r}\n")).install(lockfile(%w[rack 3.1.8])).grep(/newer than/))
+          .to eq([])
+      end
     end
   end
 
@@ -152,9 +186,10 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       expect(File.read(File.join(@canister.dir, "gems/eucgem-1.0.0/lib/eucgem/bin.rb"))).to eq("# encoding: binary\n")
     end
 
-    it "keeps the three-encoding rule when the Release is unknown, and says how to lift it" do
-      expect { build.install(lockfile(%w[eucgem 1.0.0])) }
-        .to raise_error(RubyWasmIcInstaller::MagicComment::Refused, /declare `release:`/)
+    it "does the same when the Release is unknown, since no Release it knows has fewer" do
+      report = build.install(lockfile(%w[eucgem 1.0.0]))
+      expect(report.grep(/rewrite/)).to eq([])
+      expect(File.read(File.join(@canister.dir, "gems/eucgem-1.0.0/lib/eucgem.rb"))).to start_with("# -*- coding: euc-jp -*-")
     end
   end
 
@@ -170,6 +205,11 @@ RSpec.describe RubyWasmIcInstaller::Installer do
         .to raise_error(described_class::Refused, /update it to 0.1.5/)
       expect(build(config: c).install(lockfile(%w[rack 3.1.8], %w[ruby_wasm_ic_minimal 0.1.5])))
         .to include(match(/\Asend rack-3.1.8/))
+    end
+
+    it "refuses ruby_wasm_ic_minimal 0.1.4 when the Release is unknown, since every Release it knows refuses it" do
+      expect { build(config: config("build: minimal\n")).install(lockfile(%w[rack 3.1.8], %w[ruby_wasm_ic_minimal 0.1.4])) }
+        .to raise_error(described_class::Refused, /update it to 0.1.5/)
     end
 
     it "lets flags override the config" do
@@ -207,7 +247,10 @@ RSpec.describe RubyWasmIcInstaller::Installer do
 
   describe "status" do
     it "shows the setup's gems that the target refuses" do
-      build(config: config("build: minimal\nrelease: 0.12.0\n")).install(lockfile(%w[ruby_wasm_ic_minimal 0.1.4]))
+      # As an older Installer could have sent it.
+      install_put([{ path: "ruby_wasm_ic_minimal-0.1.4/lib/ruby_wasm_ic_minimal.rb", body: "" }])
+      install_commit({ gems: ["ruby_wasm_ic_minimal-0.1.4"],
+                       setup: { generation: 1, load_paths: ["ruby_wasm_ic_minimal-0.1.4/lib"] } })
       st = build(config: config("build: minimal\nrelease: 0.13.0\n")).status
       expect(st).to include(match(/\Arefuses minimal 0.13.0: ruby_wasm_ic_minimal-0.1.4: .*update it to 0.1.5/))
     end
@@ -333,7 +376,7 @@ RSpec.describe "gems first, then a new module" do
       factory.build("rack", "3.1.8", "lib/rack.rb" => "module Rack; end\n")
       canister = InMemoryCanister.new(File.join(dir, "data").tap { Dir.mkdir(_1) })
       canister.build = "minimal"
-      canister.release = "0.10.0"
+      canister.release = "0.13.0"
       installer = RubyWasmIcInstaller::Installer.new(
         runner: canister, gem_files: RubyWasmIcInstaller::GemFiles.new(cache: File.join(dir, "cache"), fetcher: factory.fetcher)
       )
@@ -341,10 +384,10 @@ RSpec.describe "gems first, then a new module" do
                                                "PLATFORMS\n  ruby\n\nDEPENDENCIES\n  rack\n")
       installer.install(lock)
       canister.build = "full" # the new module
-      canister.release = "0.13.0"
+      canister.release = "0.14.0"
       canister.upgrade!
       expect(require("rack")).to be(true)
-      expect(installer.status).to include("canister: protocol 3, build full, release 0.13.0")
+      expect(installer.status).to include("canister: protocol 3, build full, release 0.14.0")
     end
   end
 end

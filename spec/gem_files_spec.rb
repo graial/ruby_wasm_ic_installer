@@ -15,7 +15,7 @@ RSpec.describe RubyWasmIcInstaller::GemFiles do
     end
   end
 
-  it "opens only the gem's require_paths, fixing magic comments on the way" do
+  it "opens only the gem's require_paths, leaving magic comments as written" do
     @factory.build("rack", "3.1.8", "lib/rack.rb" => "module Rack; end\n",
                                     "lib/rack/utils.rb" => "# -*- encoding: binary -*-\nx\n",
                                     "lib/rack/data.txt" => "# encoding: binary\n",
@@ -24,9 +24,7 @@ RSpec.describe RubyWasmIcInstaller::GemFiles do
     expect(p.name_version).to eq("rack-3.1.8")
     expect(p.require_paths).to eq(["lib"])
     expect(p.files).to eq("lib/rack.rb" => "module Rack; end\n", "lib/rack/data.txt" => "# encoding: binary\n",
-                          "lib/rack/utils.rb" => "# -*- encoding: ascii-8bit -*-\nx\n")
-    expect(p.rewrites.map(&:to_h)).to eq([{ file: "rack-3.1.8/lib/rack/utils.rb", line: 1, from: "binary",
-                                            to: "ascii-8bit" }])
+                          "lib/rack/utils.rb" => "# -*- encoding: binary -*-\nx\n")
     expect(p.bytes).to eq(p.files.values.sum(&:bytesize))
   end
 

@@ -4,7 +4,7 @@
 RSpec.describe RubyWasmIcInstaller::Plan do
   c = RubyWasmIcInstaller::Candid
   prep = lambda do |nv, files, paths = ["lib"]|
-    RubyWasmIcInstaller::GemFiles::Prepared.new(name_version: nv, require_paths: paths, files: files, rewrites: [])
+    RubyWasmIcInstaller::GemFiles::Prepared.new(name_version: nv, require_paths: paths, files: files)
   end
   fresh = { running: nil, pending: nil, gems: [], partial: [], load_paths: [], running_paths: [] }
   decoded = ->(step) { c.decode(step.args).first }

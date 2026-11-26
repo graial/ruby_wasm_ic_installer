@@ -11,8 +11,8 @@ require "rbconfig"
 # canister serves a page through them. Then a second install sends nothing.
 #
 # Skipped unless asked:
-#   E2E_BASE=path/to/ruby-3.3-wasm32-unknown-icp-minimal-0.8.0.wasm
-#   E2E_PACKER=path/to/packer-0.8.0          (the unpacked packer tarball)
+#   E2E_BASE=path/to/ruby-3.3-wasm32-unknown-icp-minimal-0.15.0.wasm
+#   E2E_PACKER=path/to/packer-0.15.0         (the unpacked packer tarball)
 #   E2E_ICP=icp                              (icp-cli 1.6 or later; default icp)
 #   ICP_CLI_NETWORK_LAUNCHER_PATH=...        (if icp-cli cannot fetch its launcher)
 # and run with `bundle exec rspec spec/e2e`. It needs rubygems.org and a few

@@ -10,9 +10,9 @@ module RubyWasmIcInstaller
   # One locked gem made ready to send (W29, Q8 and Q9): its `.gem` fetched
   # for platform `ruby` (or found in the cache), checked against the lock's
   # sha256 when the lock has one, refused if it has extensions, and opened
-  # for its require_paths alone, with magic comments fixed.
+  # for its require_paths alone, with magic comments checked.
   class GemFiles
-    Prepared = Struct.new(:name_version, :require_paths, :files, :rewrites, keyword_init: true) do
+    Prepared = Struct.new(:name_version, :require_paths, :files, keyword_init: true) do
       def bytes = files.sum { _2.bytesize }
     end
 
@@ -25,18 +25,17 @@ module RubyWasmIcInstaller
       @fetcher = fetcher || method(:gem_fetch)
     end
 
-    # `release`: the target Release's Gem::Version, or nil, for MagicComment.
-    def prepare(locked, release: nil)
+    def prepare(locked)
       path = fetch(locked)
       check_sum!(locked, path)
       package = ::Gem::Package.new(path)
       spec = package.spec
       check_spec!(locked, spec)
-      files, rewrites = read_files(locked, package, spec, release)
+      files = read_files(package, spec, locked)
       paths = spec.require_paths.select { |rp| files.keys.any? { _1.start_with?("#{rp}/") } }
       raise Refused, "#{locked.name_version} has no files under #{spec.require_paths.join(', ')}" if paths.empty?
 
-      Prepared.new(name_version: locked.name_version, require_paths: paths, files: files, rewrites: rewrites)
+      Prepared.new(name_version: locked.name_version, require_paths: paths, files: files)
     end
 
     # The stand-ins a fetched ruby_wasm_ic_minimal carries: the libraries it
@@ -107,9 +106,8 @@ module RubyWasmIcInstaller
                      "be added to ruby_wasm_builder"
     end
 
-    def read_files(locked, package, spec, release)
+    def read_files(package, spec, locked)
       files = {}
-      rewrites = []
       Dir.mktmpdir do |dir|
         # extract_files matches without FNM_PATHNAME, so "*" crosses "/":
         # "lib/*" is every file at every depth under lib/ ("lib/**/*" would
@@ -125,15 +123,12 @@ module RubyWasmIcInstaller
 
             body = File.binread(full)
             path = "#{rp}/#{rel}"
-            if rel.end_with?(".rb")
-              body, rewrite = MagicComment.fix("#{locked.name_version}/#{path}", body, release: release)
-              rewrites << rewrite if rewrite
-            end
+            MagicComment.check!("#{locked.name_version}/#{path}", body) if rel.end_with?(".rb")
             files[path] = body
           end
         end
       end
-      [files, rewrites]
+      files
     end
   end
 end

@@ -86,11 +86,10 @@ RSpec.describe RubyWasmIcInstaller::Rules do
     expect(msgs.first).to include("ruby_wasm_ic_minimal-0.1.5", "remove it from the Gemfile: `full` links the real extensions")
   end
 
-  it "refuses ruby_wasm_ic_minimal before 0.1.5 on minimal 0.13.0 and later, and only there" do
+  it "refuses ruby_wasm_ic_minimal before 0.1.5 on minimal, whatever the Release" do
     old = [["ruby_wasm_ic_minimal", "0.1.4"]]
     expect(described_class.refused(target("minimal", "0.13.0"), old).first).to include("update it to 0.1.5")
-    expect(described_class.refused(target("minimal", "0.12.0"), old)).to eq([])
-    expect(described_class.refused(target("minimal"), old)).to eq([])
+    expect(described_class.refused(target("minimal"), old).first).to include("update it to 0.1.5")
     expect(described_class.refused(target("minimal", "0.13.0"), [["ruby_wasm_ic_minimal", "0.1.5"]])).to eq([])
   end
 end

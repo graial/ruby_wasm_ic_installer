@@ -40,10 +40,20 @@ module RubyWasmIcInstaller
 
     def assumed? = assumed == true
 
-    def check!
-      return unless build == "full" && release_version && release_version < Rules::FULL_FROM
+    # What the target's Release says about this Installer's tables: a warning
+    # when it is newer than every Known Release.
+    def warnings
+      return [] unless release_version && !Rules::KNOWN_RELEASES.satisfied_by?(release_version)
 
-      raise Error, "#{release_source}: `full` exists from ruby_wasm_builder #{Rules::FULL_FROM}, not #{release}"
+      ["release #{release} is newer than this Installer knows (#{Rules::NEWEST_KNOWN} at most): " \
+       "its tables may be out of date"]
+    end
+
+    def check!
+      return unless release_version && release_version < Rules::OLDEST_KNOWN
+
+      raise Error, "#{release_source}: release #{release} is older than this Installer knows " \
+                   "(#{Rules::OLDEST_KNOWN} or later)"
     end
   end
 end
