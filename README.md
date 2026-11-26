@@ -322,11 +322,7 @@ If icp-cli cannot fetch its network launcher, download it by tag from
 
 ## Versions
 
-- **0.1.0:** the first release.
-- **0.4.0:** Known Releases (ruby_wasm_builder 0.13.0 to 0.15.0); Releases
-  before 0.13.0 are refused, so the three-encoding rule and its rewrites are
-  gone, and `ruby_wasm_ic_minimal` before 0.1.5 is refused on `minimal`
-  whatever the Release. Ruby is 3.3.3, not 3.3.6, in messages. `setup` reads
-  the Application's files as UTF-8 under any locale.
+See [CHANGELOG.md](CHANGELOG.md): what each version changes, the builder
+Releases it knows, and its protocol.
 
 MIT licensed.
