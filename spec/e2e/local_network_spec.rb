@@ -2,6 +2,7 @@
 
 require "open3"
 require "rbconfig"
+require "socket"
 
 # Layer 3 (W29, Q18): the Installer end to end, on a local icp-cli network
 # (whose launcher runs PocketIC). It repeats W28 through the gem: `setup` wires
@@ -16,6 +17,8 @@ require "rbconfig"
 #   E2E_BASE=path/to/ruby-3.3-wasm32-unknown-icp-minimal-0.15.0.wasm
 #   E2E_PACKER=path/to/packer-0.15.0         (the unpacked packer tarball)
 #   E2E_BUILD=minimal|full                   (default: from E2E_BASE's name)
+#   E2E_PORT=8123                            (the network's port; default: a free one,
+#                                             so another project's network on 8000 can stay)
 #   E2E_ICP=icp                              (icp-cli 1.6 or later; default icp)
 #   ICP_CLI_NETWORK_LAUNCHER_PATH=...        (if icp-cli cannot fetch its launcher)
 # and run with `bundle exec rspec spec/e2e`. It needs rubygems.org and a few
@@ -76,11 +79,14 @@ RSpec.describe "the Installer on a local icp-cli network", :e2e do
 
     FileUtils.mkdir_p(File.join(@dir, "site"))
     sh(RbConfig.ruby, File.join(packer, "pack.rb"), base, app, File.join(@dir, "site", "site.wasm"))
-    File.write(File.join(@dir, "icp.yaml"), "canisters:\n  - site\n")
+    port = ENV.fetch("E2E_PORT") { TCPServer.open("127.0.0.1", 0) { _1.addr[1] } }
+    File.write(File.join(@dir, "icp.yaml"), "canisters:\n  - site\nnetworks:\n  - name: local\n    mode: managed\n" \
+                                            "    gateway:\n      port: #{port}\n")
     sh(icp, "network", "start", "-d")
     @started = true
     sh(icp, "deploy", "--yes")
     expect(get("/books")).to eq("w28 app not installed")
+    expect(cli("status", "site", "--icp", icp, "--project-root", @dir)).to match(/^boot: failed LoadError: /)
 
     report = cli("install", "site", "--lock", File.join(@dir, "Gemfile.lock"), "--icp", icp,
                  "--project-root", @dir, "--cache", File.join(@dir, "cache"))
@@ -96,7 +102,7 @@ RSpec.describe "the Installer on a local icp-cli network", :e2e do
     expect(get("/books")).to eq("1: Noli Me Tangere")
     expect(get("/books/search?q=Jos%C3%A9")).to eq("q=José")
     status = cli("status", "site", "--icp", icp, "--project-root", @dir)
-    expect(status).to include("running generation: 1", "pending generation: 1",
+    expect(status).to include("boot: booted", "running generation: 1", "pending generation: 1",
                               "installed: #{sent.join(', ')}", "known releases: 0.13.0 to 0.15.0 " \
                               "(ruby_wasm_ic_installer #{RubyWasmIcInstaller::VERSION})")
 

@@ -22,8 +22,8 @@ module RubyWasmIcInstaller
   module Canister
     # The version of this half's API, reported by `installed`. 1 had no
     # protocol field; 2 adds protocol, build, release, load_failures and
-    # install_verify; 3 adds linked.
-    PROTOCOL = 3
+    # install_verify; 3 adds linked; 4 adds boot, the Boot outcome.
+    PROTOCOL = 4
     MAX_FAILURES = 50
 
     # Prepended to Object so every `require` passes through. It records an
@@ -57,6 +57,7 @@ module RubyWasmIcInstaller
         @running_paths = []
         @failures = []
         @depth = 0
+        @boot = nil
         Object.prepend(RequireRecorder) unless Object.ancestors.include?(RequireRecorder)
         load(setup_file) if File.file?(setup_file)
         self
@@ -73,15 +74,24 @@ module RubyWasmIcInstaller
         nil
       end
 
+      # Called by the Application once its boot has ended: with nil when it
+      # booted, or with the error that failed it. Only the first call in a
+      # boot counts.
+      def boot_finished(error = nil)
+        @boot ||= error ? "failed #{describe(error)}" : "booted"
+        nil
+      end
+
       # Runs a `require`; if it raises out of the outermost call, notes which
       # installed gem it came from. A gem's own `rescue LoadError` around an
-      # optional require is nested, so it is not recorded.
+      # optional require is nested, so it is not recorded; nor is anything
+      # once the Application has called boot_finished.
       def record_require
         outer = (@depth ||= 0).zero?
         @depth += 1
         yield
       rescue ScriptError, StandardError => e
-        record_failure(e) if outer && !@verifying
+        record_failure(e) if outer && !@verifying && !@boot
         raise
       ensure
         @depth -= 1
@@ -166,7 +176,8 @@ module RubyWasmIcInstaller
           build: builder_const(:BUILD),
           release: builder_const(:RELEASE),
           linked: builder_list(:LINKED_EXTENSIONS),
-          load_failures: (@failures || []).dup
+          load_failures: (@failures || []).dup,
+          boot: @boot
         }
       end
 

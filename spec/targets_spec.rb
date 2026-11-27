@@ -234,7 +234,7 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       @canister.build = "minimal"
       @canister.release = "0.12.0"
       report = build(config: config("build: full\nrelease: 0.13.0\n")).install(lockfile(%w[rack 3.1.8]))
-      expect(report).to include("canister: protocol 3, build minimal, release 0.12.0",
+      expect(report).to include("canister: protocol 4, build minimal, release 0.12.0",
                                 "transition: the canister runs minimal 0.12.0; this is for full 0.13.0")
     end
 
@@ -284,6 +284,70 @@ RSpec.describe RubyWasmIcInstaller::Installer do
       @canister.upgrade!
       expect { require "rack" }.to raise_error(LoadError)
       expect(build.status).to include("load failure: rack-3.1.8: LoadError: cannot load such file -- x")
+    end
+  end
+
+  describe "the Boot outcome" do
+    # A boot in which installed rack-3.1.8 raised a LoadError that the
+    # Application rescued, then reported `outcome` (:booted, an error, or
+    # nothing).
+    def boot_with_rescued_failure(outcome = nil)
+      build.install(lockfile(%w[rack 3.1.8]))
+      File.write(File.join(@canister.dir, "gems/rack-3.1.8/lib/rack.rb"), "raise LoadError, 'cannot load such file -- x'\n")
+      @canister.upgrade!
+      begin
+        require "rack"
+      rescue LoadError
+        nil
+      end
+      RubyWasmIcInstaller::Canister.boot_finished(outcome == :booted ? nil : outcome) if outcome
+    end
+
+    let(:failure) { "rack-3.1.8: LoadError: cannot load such file -- x" }
+
+    it "shows a booted boot's load failures as rescued, and verify passes" do
+      boot_with_rescued_failure(:booted)
+      expect(build.status).to include("boot: booted", "rescued during boot: #{failure}")
+      expect(build.status.grep(/\Aload failure:/)).to eq([])
+      expect(build.verify).to eq(["no verify: list in .ruby_wasm_ic_installer.yml; checking the boot's load failures only",
+                                  "boot: booted", "rescued during boot: #{failure}",
+                                  "verified: 0 require names; the boot reported it booted"])
+    end
+
+    it "shows a failed boot's error first and its load failures as clues, and verify fails on the error" do
+      boot_with_rescued_failure(TypeError.new("no data source"))
+      expect(build.status).to include("boot: failed TypeError: no data source", "before the failure: #{failure}")
+      expect { build.verify }.to raise_error(described_class::VerifyFailed) { |e|
+        expect(e.lines).to include("boot: failed TypeError: no data source", "before the failure: #{failure}", "1 failed")
+      }
+    end
+
+    it "counts load failures as today when the Application doesn't report it, and says how to" do
+      boot_with_rescued_failure
+      expect(build.status).to include("boot: not reported (call RubyWasmIcInstaller::Canister.boot_finished at the " \
+                                      "end of the boot to report it)", "load failure: #{failure}")
+      expect { build.verify }.to raise_error(described_class::VerifyFailed) { |e| expect(e.lines).to include("1 failed") }
+    end
+
+    it "asks for setup on a protocol 3 canister half, and counts load failures as today" do
+      @canister.protocol_three!
+      boot_with_rescued_failure
+      st = build.status
+      expect(st).to include("canister half: protocol 3, which reports no Boot outcome: re-run " \
+                            "`ruby_wasm_ic_installer setup` to update it", "load failure: #{failure}")
+      expect(st.grep(/\Aboot:/)).to eq([])
+    end
+
+    it "decides install --upgrade the same way" do
+      installer = build(config: config("verify: []\n"))
+      allow(@canister).to receive(:deploy).and_wrap_original do |m|
+        m.call
+        RubyWasmIcInstaller::Canister.boot_finished(TypeError.new("no data source"))
+      end
+      expect { installer.install(lockfile(%w[rack 3.1.8]), upgrade: true) }
+        .to raise_error(described_class::VerifyFailed) { |e|
+          expect(e.lines).to include("boot: failed TypeError: no data source", "upgraded, but 1 failed")
+        }
     end
   end
 
@@ -397,7 +461,7 @@ RSpec.describe "gems first, then a new module" do
       canister.release = "0.14.0"
       canister.upgrade!
       expect(require("rack")).to be(true)
-      expect(installer.status).to include("canister: protocol 3, build full, release 0.14.0")
+      expect(installer.status).to include("canister: protocol 4, build full, release 0.14.0")
     end
   end
 end

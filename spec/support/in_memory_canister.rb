@@ -20,10 +20,12 @@ class InMemoryCanister
   # (IC::BUILD, IC::RELEASE, IC::LINKED_EXTENSIONS); nil reports nothing.
   # `protocol_one!` answers as the 0.1.x canister half did: no new fields, no
   # install_verify. `protocol_two!` answers as 0.2.x's did: no `linked`.
+  # `protocol_three!` answers as 0.3.x and 0.4.x's did: no `boot`.
   attr_accessor :build, :release, :linked
 
   def protocol_one! = @protocol = 1
   def protocol_two! = @protocol = 2
+  def protocol_three! = @protocol = 3
 
   def initialize(dir)
     @dir = dir
@@ -110,9 +112,13 @@ class InMemoryCanister
       values.merge!("protocol" => C.nat64_value(@protocol || value[:protocol]), "build" => opt_text.(value[:build]),
                     "release" => opt_text.(value[:release]), "load_failures" => C.texts_value(value[:load_failures]))
     end
-    unless @protocol
+    unless @protocol && @protocol < 3
       fields << ["linked", C.sleb(4)]
       values["linked"] = value[:linked].nil? ? "\x00".b : "\x01".b + C.texts_value(value[:linked])
+    end
+    unless @protocol
+      fields << ["boot", C.sleb(3)]
+      values["boot"] = opt_text.(value[:boot])
     end
     table = C.types(C.record_type(fields), "\x6e".b + C.sleb(C::NAT64), "\x6d".b + C.sleb(C::TEXT),
                     "\x6e".b + C.sleb(C::TEXT), "\x6e".b + C.sleb(2))

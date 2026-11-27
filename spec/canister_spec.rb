@@ -22,15 +22,36 @@ RSpec.describe RubyWasmIcInstaller::Canister do
   def refused(&blk) = expect(&blk).to(raise_error(IC::Refusal))
   def gems_dir = File.join(@data, "gems")
 
-  describe "installed, as protocol 3" do
+  describe "installed, as protocol 4" do
     it "reports the protocol, the builder's Build, Release and linked extensions when it says them, and no load failures" do
-      expect(installed).to include(protocol: 3, build: nil, release: nil, linked: nil, load_failures: [])
+      expect(installed).to include(protocol: 4, build: nil, release: nil, linked: nil, load_failures: [])
       IC.const_set(:BUILD, "full")
       IC.const_set(:RELEASE, "0.0.0")
       IC.const_set(:LINKED_EXTENSIONS, %w[json/ext/parser stringio].freeze)
       expect(installed).to include(build: "full", release: "0.0.0", linked: %w[json/ext/parser stringio])
     ensure
       %i[BUILD RELEASE LINKED_EXTENSIONS].each { IC.send(:remove_const, _1) if IC.const_defined?(_1) }
+    end
+  end
+
+  describe "the Boot outcome" do
+    it "is unreported until the Application calls boot_finished, and booted when it passes no error" do
+      expect(installed[:boot]).to be_nil
+      described_class.boot_finished
+      expect(installed[:boot]).to eq("booted")
+    end
+
+    it "is failed, with the error's class and first line, when the Application passes one" do
+      described_class.boot_finished(TypeError.new("no data source\nsecond line"))
+      expect(installed[:boot]).to eq("failed TypeError: no data source")
+    end
+
+    it "counts only the first call in a boot, and is unreported again at the next boot" do
+      described_class.boot_finished(TypeError.new("first"))
+      described_class.boot_finished
+      expect(installed[:boot]).to eq("failed TypeError: first")
+      described_class.boot!
+      expect(installed[:boot]).to be_nil
     end
   end
 
@@ -45,6 +66,13 @@ RSpec.describe RubyWasmIcInstaller::Canister do
       install_gem("badgem", "raise LoadError, \"cannot load such file -- dep\\nsecond line\"\n")
       expect { require "badgem" }.to raise_error(LoadError, /cannot load such file -- dep/)
       expect(installed[:load_failures]).to eq(["badgem-1.0.0: LoadError: cannot load such file -- dep"])
+    end
+
+    it "records nothing once the Application has called boot_finished: a request's require is not the boot's" do
+      install_gem("badgem", "raise LoadError, 'x'\n")
+      described_class.boot_finished
+      expect { require "badgem" }.to raise_error(LoadError)
+      expect(installed[:load_failures]).to eq([])
     end
 
     it "records a syntax error in a gem as well" do

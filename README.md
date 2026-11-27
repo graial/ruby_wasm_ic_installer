@@ -225,6 +225,31 @@ require is nested, so it is not recorded; an Application that rescues
 `LoadError` itself for a deliberately optional gem will see it listed.
 `status` prints them as `load failure:`.
 
+**The Boot outcome.** Only the Application knows where its boot ends, and
+what failed it: an error something rescued, such as TZInfo's `require
+"tzinfo/data"`, still escapes a `require`, and an error that isn't a
+`require`'s is never recorded. So the Application can say how its boot
+ended, once, at its end:
+
+```ruby
+APP = MyBoot.run                                            # rescues, and keeps the error
+RubyWasmIcInstaller::Canister.boot_finished(MyBoot.error)   # nil when it booted
+```
+
+`installed` then reports `boot` (protocol 4), and the load failures read
+by it:
+
+| Boot outcome | `status` and `verify` show | `verify` and `--upgrade` fail on |
+| --- | --- | --- |
+| booted | `boot: booted`, and each load failure as `rescued during boot:` | the `verify:` names only |
+| failed | `boot: failed <class>: <message>`, and each load failure as `before the failure:` | the boot's error |
+| not reported | `load failure:`, as before; `status` says how to report it | each load failure |
+
+Nothing is recorded after `boot_finished`: a failing `require` while
+answering a call is that call's error, not the boot's. An Application whose
+boot can raise should rescue it, as a raise at `app.rb`'s top level traps
+the install or upgrade, and the Installer's methods with it.
+
 `verify` goes further: it calls `install_verify` (a query, so it changes
 nothing) with the names in `verify:`, which `require`s each on the canister
 and answers `ok` or the error. It takes names, never code. `verify-init`
@@ -289,9 +314,10 @@ target refuses.
   encodings as the canister's Ruby 3.3.
 - **Two halves, one version.** The canister half is vendored into the
   Application, so it can be older than this gem. `installed` reports a
-  `protocol` number (3 from 0.3.0). Against protocol 2 the Installer still
-  installs, from its own table of linked extensions, and `status` asks you to
-  re-run `setup`; against protocol 1 it still installs, says the canister half
+  `protocol` number (3 from 0.3.0, 4 from 0.5.0). Against protocol 3 the
+  Installer reads no Boot outcome and `status` asks you to re-run `setup`.
+  Against protocol 2 it still installs, from its own table of linked
+  extensions, and `status` asks you to re-run `setup`; against protocol 1 it still installs, says the canister half
   reports no Build and no load failures, and `verify` asks you to re-run
   `setup`.
 - The canister keeps no content hash of what it holds yet: `installed` reports
@@ -321,7 +347,8 @@ installs Rack, Roda and the two `ruby_wasm_ic` gems from a real lock, upgrades,
 serves a page through them, and checks that a second install sends nothing.
 If icp-cli cannot fetch its network launcher, download it by tag from
 `dfinity/icp-cli-network-launcher`'s releases and set
-`ICP_CLI_NETWORK_LAUNCHER_PATH`.
+`ICP_CLI_NETWORK_LAUNCHER_PATH`. Its network runs on a free port (or
+`E2E_PORT`), so another project's network on 8000 can stay up.
 
 ## Versions
 

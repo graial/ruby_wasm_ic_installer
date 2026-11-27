@@ -6,6 +6,24 @@ version knows is listed under **Known Releases**, not encoded in the number.
 **Protocol** is the version of the canister half's interface. When it changes,
 re-run `setup` and upgrade once.
 
+## 0.5.0: 26 November 2026
+
+Known Releases: 0.13.0 to 0.15.0. Protocol 4: `installed` adds `boot`.
+Re-run `setup` and upgrade once.
+
+- **The Boot outcome.** An Application can say how its boot ended by calling
+  `RubyWasmIcInstaller::Canister.boot_finished(error)` once at its end, with
+  nil when it booted. `status` and `verify` show `boot: booted` or `boot:
+  failed <class>: <message>`.
+- **Load failures read by it.** When the boot reported it booted, they're
+  shown as `rescued during boot:` and don't fail `verify` or `install
+  --upgrade`. When it reported failing, they're shown under the error as
+  `before the failure:`, and the error is what fails. When it reports
+  nothing, they count as before.
+- **The recorder stops at `boot_finished`:** a failing `require` while
+  answering a call is not the boot's.
+- Against a protocol 3 canister half, `status` asks you to re-run `setup`.
+
 ## 0.4.1: 26 November 2026
 
 Known Releases: 0.13.0 to 0.15.0. Protocol 3, unchanged.

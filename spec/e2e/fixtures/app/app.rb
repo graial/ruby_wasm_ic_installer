@@ -3,7 +3,9 @@
 # The end-to-end Application: roda_on_minimal's Books app (0.7.0), with Rack,
 # Roda and the ruby_wasm_ic gems the Build needs installed through calls by the Installer, not
 # packed. Until they are installed and an upgrade has loaded them, the
-# gateway answers 503. setup writes the Installer's block above this comment.
+# gateway answers 503, and the app reports its boot as failed. setup writes
+# the Installer's block above this comment.
+boot_error = nil
 W28_APP =
   begin
     # First, on minimal: the Encoding constants and the stand-ins. `full`
@@ -35,9 +37,11 @@ W28_APP =
     end
 
     Books.app
-  rescue LoadError
+  rescue LoadError => e
+    boot_error = e
     nil
   end
+RubyWasmIcInstaller::Canister.boot_finished(boot_error)
 
 NOT_YET = { status_code: 503, headers: [["content-type", "text/plain"]], body: "w28 app not installed".b,
             upgrade: nil }.freeze

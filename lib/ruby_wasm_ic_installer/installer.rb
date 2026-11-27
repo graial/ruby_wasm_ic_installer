@@ -14,9 +14,11 @@ module RubyWasmIcInstaller
   class Installer
     MINIMAL = "ruby_wasm_ic_minimal"
     REQUIRED = %i[running pending gems partial load_paths running_paths].freeze
-    # Fields a protocol-1 canister half does not have (and `linked`, a
-    # protocol-2 one).
-    OPTIONAL = { protocol: 1, build: nil, release: nil, load_failures: [], linked: nil }.freeze
+    # Fields a protocol-1 canister half does not have (`linked`, a protocol-2
+    # one; `boot`, a protocol-3 one).
+    BOOT_CALL = "RubyWasmIcInstaller::Canister.boot_finished"
+
+    OPTIONAL = { protocol: 1, build: nil, release: nil, load_failures: [], linked: nil, boot: nil }.freeze
 
     # The target would load a gem that refuses it, the lock holds a compiled
     # gem, or --strict met a warning: nothing was sent.
@@ -50,7 +52,7 @@ module RubyWasmIcInstaller
         *(i[:partial].empty? ? [] : ["half-sent (.partial): #{i[:partial].join(', ')}"]),
         *canister_lines(i), target.describe, known_line, *target.warnings.map { "warning: #{_1}" },
         *transition_lines(i, target), *linked(target, i).last,
-        *refusal_lines(target, i), *failure_lines(i)
+        *refusal_lines(target, i), *boot_lines(i, hint: true)
       ]
     end
 
@@ -90,11 +92,12 @@ module RubyWasmIcInstaller
       lines = @config.verify.empty? ? ["no verify: list in #{Config::FILE}; checking the boot's load failures only"] : []
       results = @config.verify.empty? ? [] : verify_calls(@config.verify)
       lines.concat(results)
-      lines.concat(failure_lines(i))
-      failed = results.grep(/\AFAIL /).size + i[:load_failures].size
+      lines.concat(boot_lines(i))
+      failed = results.grep(/\AFAIL /).size + boot_failures(i)
       raise VerifyFailed, lines + ["#{failed} failed"] unless failed.zero?
 
-      lines << "verified: #{results.size} require names, no load failures"
+      lines << "verified: #{results.size} require names" \
+               "#{i[:boot] == 'booted' ? '; the boot reported it booted' : ', no load failures'}"
     end
 
     def prune(dry_run: false)
@@ -163,8 +166,8 @@ module RubyWasmIcInstaller
       i = installed
       results = @config.verify.empty? ? [] : verify_calls(@config.verify)
       report.concat(results)
-      report.concat(failure_lines(i))
-      failed = results.grep(/\AFAIL /).size + i[:load_failures].size
+      report.concat(boot_lines(i))
+      failed = results.grep(/\AFAIL /).size + boot_failures(i)
       raise VerifyFailed, report + ["upgraded, but #{failed} failed"] unless failed.zero?
 
       report << "upgraded: the boot loaded every gem#{@config.verify.empty? ? '' : " and #{results.size} verify names"}"
@@ -253,7 +256,9 @@ module RubyWasmIcInstaller
       ["canister: protocol #{i[:protocol]}, #{i[:build] ? "build #{i[:build]}" : 'build not reported'}" \
        "#{i[:release] ? ", release #{i[:release]}" : ''}",
        *(i[:protocol] < 3 ? ["canister half: protocol #{i[:protocol]}, which reports no linked extensions: re-run " \
-                             "`ruby_wasm_ic_installer setup` to update it"] : [])]
+                             "`ruby_wasm_ic_installer setup` to update it"] : []),
+       *(i[:protocol] == 3 ? ["canister half: protocol 3, which reports no Boot outcome: re-run " \
+                              "`ruby_wasm_ic_installer setup` to update it"] : [])]
     end
 
     # The declared target against what the canister runs: a move to another
@@ -273,7 +278,29 @@ module RubyWasmIcInstaller
 
     def known_line = "known releases: #{Rules::OLDEST_KNOWN} to #{Rules::NEWEST_KNOWN} (ruby_wasm_ic_installer #{VERSION})"
 
-    def failure_lines(i) = i[:load_failures].map { "load failure: #{_1}" }
+    # The Boot outcome, and the load failures read by it: rescued when the
+    # boot reported it booted, clues when it reported failing, and failures
+    # in their own right when it reported nothing. `hint`: say how to report
+    # it, when the canister half could.
+    def boot_lines(i, hint: false)
+      case i[:boot]
+      when nil
+        unreported = hint && i[:protocol] >= 4 ? ["boot: not reported (call #{BOOT_CALL} at the end of the boot to report it)"] : []
+        unreported + i[:load_failures].map { "load failure: #{_1}" }
+      when "booted" then ["boot: booted", *i[:load_failures].map { "rescued during boot: #{_1}" }]
+      else ["boot: #{i[:boot]}", *i[:load_failures].map { "before the failure: #{_1}" }]
+      end
+    end
+
+    # What fails a verify or an upgrade: the boot's own error when it reported
+    # one, nothing when it reported it booted, and else each load failure.
+    def boot_failures(i)
+      case i[:boot]
+      when nil then i[:load_failures].size
+      when "booted" then 0
+      else 1
+      end
+    end
 
     def names_of(paths) = paths.map { _1.split("/").first }.uniq
 

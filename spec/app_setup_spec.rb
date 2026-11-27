@@ -21,6 +21,14 @@ RSpec.describe RubyWasmIcInstaller::AppSetup do
   def read(name) = File.read(File.join(@app, name))
   def vendored = File.join(@app, "vendor/ruby_wasm_ic_installer/ruby_wasm_ic_installer/canister.rb")
 
+  it "declares Installed with the fields the canister half replies with, boot an Opt[Text]" do
+    record = s::INTERFACE[/type :Installed,\s+record\((.*?)\)\n/m, 1]
+    fields = record.scan(/(\w+): /).flatten.map(&:to_sym)
+    RubyWasmIcInstaller::Canister.data_dir = @app
+    expect(fields).to match_array(RubyWasmIcInstaller::Canister.installed.keys)
+    expect(record).to include("boot: Opt[Text]")
+  end
+
   describe "on a fresh Application" do
     it "writes the Declarations block, the app.rb block after the magic comment, and the canister half" do
       written = setup.run.map { _1.path.delete_prefix("#{@app}/") }
